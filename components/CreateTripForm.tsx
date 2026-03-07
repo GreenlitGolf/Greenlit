@@ -69,7 +69,7 @@ export default function CreateTripForm() {
           placeholder="Pebble Beach 2026"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-green-600"
         />
       </div>
 
@@ -80,7 +80,7 @@ export default function CreateTripForm() {
           placeholder="Deciding soon…"
           value={destination}
           onChange={(e) => setDestination(e.target.value)}
-          className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+          className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-green-600"
         />
       </div>
 
@@ -91,7 +91,7 @@ export default function CreateTripForm() {
             type="date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-green-600"
           />
         </div>
         <div className="space-y-1">
@@ -100,7 +100,7 @@ export default function CreateTripForm() {
             type="date"
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
-            className="w-full rounded-lg border border-zinc-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-green-600"
+            className="w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:ring-2 focus:ring-green-600"
           />
         </div>
       </div>
