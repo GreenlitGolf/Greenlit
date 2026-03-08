@@ -1,12 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 
 export default function SignupPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const next = searchParams.get('next') ?? '/dashboard'
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
@@ -30,7 +33,7 @@ export default function SignupPage() {
       setError(error.message)
       setLoading(false)
     } else {
-      router.push('/dashboard')
+      router.push(next)
     }
   }
 
@@ -90,7 +93,10 @@ export default function SignupPage() {
 
         <p className="text-center text-sm text-zinc-500">
           Already have an account?{' '}
-          <Link href="/login" className="font-medium text-green-700 hover:underline">
+          <Link
+            href={`/login${next !== '/dashboard' ? `?next=${next}` : ''}`}
+            className="font-medium text-green-700 hover:underline"
+          >
             Log in
           </Link>
         </p>
