@@ -21,7 +21,7 @@ function SignupForm() {
     setLoading(true)
     setError('')
 
-    const { error } = await supabase.auth.signUp({
+    const { data: authData, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -33,6 +33,13 @@ function SignupForm() {
       setError(error.message)
       setLoading(false)
     } else {
+      if (authData.user) {
+        await supabase.from('users').insert({
+          id: authData.user.id,
+          email,
+          full_name: fullName || null,
+        })
+      }
       router.push(next)
     }
   }
