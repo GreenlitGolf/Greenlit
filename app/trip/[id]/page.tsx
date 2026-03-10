@@ -248,11 +248,22 @@ function formatDayHeader(date: Date) {
   return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
 }
 
+function parseTimeToMinutes(time: string): number {
+  const match = time.match(/^(\d+):(\d+)\s*(AM|PM)$/i)
+  if (!match) return 0
+  let h = parseInt(match[1], 10)
+  const m = parseInt(match[2], 10)
+  const period = match[3].toUpperCase()
+  if (period === 'PM' && h !== 12) h += 12
+  if (period === 'AM' && h === 12) h = 0
+  return h * 60 + m
+}
+
 function sortByTime(a: ItineraryItem, b: ItineraryItem) {
   if (!a.start_time && !b.start_time) return 0
   if (!a.start_time) return 1
   if (!b.start_time) return -1
-  return a.start_time.localeCompare(b.start_time)
+  return parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)
 }
 
 const itinLabelStyle: React.CSSProperties = {
@@ -313,13 +324,39 @@ function TripConciergeSection({
     }
   }
 
-  const [messages,      setMessages]      = useState<ChatMessage[]>(() => [makeWelcome()])
-  const [input,         setInput]         = useState('')
-  const [streaming,     setStreaming]      = useState(false)
-  const [addedCourses,  setAddedCourses]  = useState<string[]>([])
-  const [addedNotice,   setAddedNotice]   = useState<string | null>(null)
+  const [messages,     setMessages]     = useState<ChatMessage[]>([])
+  const [input,        setInput]        = useState('')
+  const [streaming,    setStreaming]     = useState(false)
+  const [addedCourses, setAddedCourses] = useState<string[]>([])
+  const [addedNotice,  setAddedNotice]  = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
+
+  // Load persisted messages from Supabase on mount
+  useEffect(() => {
+    async function loadHistory() {
+      const { data } = await supabase
+        .from('concierge_messages')
+        .select('id, role, content, created_at')
+        .eq('trip_id', tripId)
+        .order('created_at', { ascending: true })
+
+      if (data && data.length > 0) {
+        setMessages(
+          data.map((row) => ({
+            id:      row.id,
+            role:    row.role as 'user' | 'assistant',
+            content: row.content,
+          }))
+        )
+      } else {
+        // No prior history — show the welcome message but don't persist it
+        setMessages([makeWelcome()])
+      }
+    }
+    loadHistory()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripId])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -335,6 +372,12 @@ function TripConciergeSection({
     return ctx
   }
 
+  async function persistMessage(role: 'user' | 'assistant', content: string) {
+    await supabase
+      .from('concierge_messages')
+      .insert({ trip_id: tripId, role, content })
+  }
+
   async function sendMessage() {
     const text = input.trim()
     if (!text || streaming) return
@@ -348,6 +391,9 @@ function TripConciergeSection({
     setMessages((prev) => [...prev, userMsg])
     setInput('')
     setStreaming(true)
+
+    // Persist user message immediately
+    await persistMessage('user', text)
 
     const assistantId = (Date.now() + 1).toString()
     setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }])
@@ -390,6 +436,9 @@ function TripConciergeSection({
             : m
         )
       )
+
+      // Persist assistant reply (display text without GREENLIT_PICKS block)
+      await persistMessage('assistant', finalText)
     } catch {
       setMessages((prev) =>
         prev.map((m) =>
@@ -435,7 +484,10 @@ function TripConciergeSection({
       {/* Start Fresh */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 40px 0', flexShrink: 0 }}>
         <button
-          onClick={() => setMessages([makeWelcome()])}
+          onClick={async () => {
+            await supabase.from('concierge_messages').delete().eq('trip_id', tripId)
+            setMessages([makeWelcome()])
+          }}
           disabled={messages.length <= 1}
           style={{
             background:    'transparent',

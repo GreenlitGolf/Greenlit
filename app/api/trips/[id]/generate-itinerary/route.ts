@@ -36,11 +36,13 @@ Each item must have:
 }
 
 Guidelines:
+- Items within each day MUST be ordered chronologically by start_time, earliest first (e.g. 7:30 AM travel → 8:30 AM tee time → 1:00 PM lunch → 7:00 PM dinner)
 - Day 1 usually involves travel/arrival and a welcome dinner
 - Last day usually involves checkout and travel home
-- Golf days: morning tee time, lunch at the turn or after, afternoon activity or rest, group dinner
+- Golf days: include ALL rounds the user has requested. A day can have multiple tee_time items (e.g. morning round at 8:00 AM AND afternoon round at 1:30 PM). Never drop a round — if the trip has courses added or the user mentioned specific rounds, include every one of them.
+- Between two rounds on the same day, include a lunch break item at approximately 12:00-12:30 PM
+- Suggest realistic tee times: morning rounds 7:30–9:00 AM, afternoon rounds 1:00–2:00 PM
 - Be specific with meal suggestions based on the destination (don't just say "dinner")
-- Suggest a realistic tee time (7:30–9:00 AM for morning rounds)
 - Include 1-2 non-golf activities per trip (local sights, range session, 19th hole, etc.)
 - Keep descriptions concise but evocative — one sentence each`
 
@@ -76,6 +78,14 @@ export async function POST(
     .select('*', { count: 'exact', head: true })
     .eq('trip_id', tripId)
 
+  // Fetch last 10 concierge messages for additional context
+  const { data: conciergeMessages } = await supabase
+    .from('concierge_messages')
+    .select('role, content')
+    .eq('trip_id', tripId)
+    .order('created_at', { ascending: false })
+    .limit(10)
+
   // Calculate trip duration
   const startDate = trip.start_date ? new Date(trip.start_date + 'T12:00:00') : new Date()
   const endDate   = trip.end_date   ? new Date(trip.end_date   + 'T12:00:00') : startDate
@@ -89,6 +99,14 @@ export async function POST(
     .filter(Boolean)
     .join(', ') || 'None yet'
 
+  // Build concierge context summary (reverse so oldest first)
+  const recentNotes = conciergeMessages && conciergeMessages.length > 0
+    ? conciergeMessages
+        .reverse()
+        .map((m) => `${m.role === 'user' ? 'User' : 'Concierge'}: ${m.content}`)
+        .join('\n')
+    : 'None'
+
   const userMessage = [
     `Trip: ${trip.name}`,
     `Destination: ${trip.destination || 'TBD'}`,
@@ -96,7 +114,10 @@ export async function POST(
     `Group size: ${memberCount ?? 1} golfer${(memberCount ?? 1) !== 1 ? 's' : ''}`,
     `Courses added to trip: ${courseList}`,
     '',
-    'Build a full itinerary for this trip.',
+    'Recent planning notes from concierge:',
+    recentNotes,
+    '',
+    'Build a full itinerary based on the above, including all courses and rounds discussed.',
   ].join('\n')
 
   // Use ANTHROPIC_SECRET (not ANTHROPIC_API_KEY) to avoid Turbopack shadowing the SDK's
