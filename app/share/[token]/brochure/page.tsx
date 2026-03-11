@@ -245,14 +245,28 @@ export default async function BrochurePage({
       </section>
 
       {/* ── Section 3: Per-course ── */}
-      {orderedCourses.map((course, i) => (
-        <BrochureCourseSection
-          key={course.id}
-          course={course}
-          index={i}
-          isLast={i === orderedCourses.length - 1}
-        />
-      ))}
+      {orderedCourses.length === 0 ? (
+        <section style={{ background: 'var(--cream)', padding: '80px 0' }}>
+          <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px', textAlign: 'center' }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>⛳</div>
+            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '28px', color: 'var(--green-deep)', fontWeight: 700, marginBottom: '12px' }}>
+              No courses added yet
+            </h2>
+            <p style={{ fontSize: '15px', color: 'var(--text-light)', fontWeight: 300, lineHeight: 1.7, maxWidth: '420px', margin: '0 auto 28px' }}>
+              Use the Golf Concierge to find courses and add them to your trip — they'll appear here in your brochure.
+            </p>
+          </div>
+        </section>
+      ) : (
+        orderedCourses.map((course, i) => (
+          <BrochureCourseSection
+            key={course.id}
+            course={course}
+            index={i}
+            isLast={i === orderedCourses.length - 1}
+          />
+        ))
+      )}
 
       {/* ── Section 4: Organizer Notes ── */}
       {hasNotes && (

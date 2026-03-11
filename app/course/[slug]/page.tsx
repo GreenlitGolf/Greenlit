@@ -1,9 +1,9 @@
-import { notFound } from 'next/navigation'
 import Link from 'next/link'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
-import CourseHero    from '@/components/course/CourseHero'
-import CourseContent from '@/components/course/CourseContent'
-import CourseSidebar from '@/components/course/CourseSidebar'
+import CourseHero     from '@/components/course/CourseHero'
+import CourseContent  from '@/components/course/CourseContent'
+import CourseSidebar  from '@/components/course/CourseSidebar'
+import CourseNotFound from '@/components/course/CourseNotFound'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ export default async function CourseDetailPage({
   const { slug }   = await params
   const { tripId } = await searchParams
   const course     = await getCourse(slug)
-  if (!course) notFound()
+  if (!course) return <CourseNotFound slug={slug} />
 
   const backHref  = tripId ? `/trip/${tripId}` : '/dashboard'
   const backLabel = tripId ? '← Back to Trip' : '← Dashboard'
@@ -206,6 +206,7 @@ export default async function CourseDetailPage({
             lodgingOnProperty={course.lodging_on_property}
             lodgingDescription={course.lodging_description}
             nearbyLodging={course.nearby_lodging ?? []}
+            tripId={tripId}
           />
         </div>
       </div>

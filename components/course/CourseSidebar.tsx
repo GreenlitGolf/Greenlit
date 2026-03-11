@@ -1,6 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/context/AuthContext'
 import AddToTripModal from './AddToTripModal'
 
 interface NearbyLodging {
@@ -11,20 +13,21 @@ interface NearbyLodging {
 }
 
 interface CourseSidebarProps {
-  courseId:          string
-  courseName:        string
-  courseLocation:    string
-  courseSlug:        string
-  priceMin:          number | null
-  priceMax:          number | null
-  tags:              string[]
-  rating:            number | null
-  bestTimeToVisit:   string | null
-  walkingFriendly:   boolean
-  caddieAvailable:   boolean
-  lodgingOnProperty: string | null
+  courseId:           string
+  courseName:         string
+  courseLocation:     string
+  courseSlug:         string
+  priceMin:           number | null
+  priceMax:           number | null
+  tags:               string[]
+  rating:             number | null
+  bestTimeToVisit:    string | null
+  walkingFriendly:    boolean
+  caddieAvailable:    boolean
+  lodgingOnProperty:  string | null
   lodgingDescription: string | null
-  nearbyLodging:     NearbyLodging[]
+  nearbyLodging:      NearbyLodging[]
+  tripId?:            string  // when navigated from within a trip context
 }
 
 export default function CourseSidebar({
@@ -42,8 +45,12 @@ export default function CourseSidebar({
   lodgingOnProperty,
   lodgingDescription,
   nearbyLodging,
+  tripId,
 }: CourseSidebarProps) {
-  const [modalOpen, setModalOpen] = useState(false)
+  const { session }  = useAuth()
+  const [modalOpen,  setModalOpen]  = useState(false)
+  const [added,      setAdded]      = useState(false)
+  const [addLoading, setAddLoading] = useState(false)
 
   const priceStr =
     priceMin && priceMax
@@ -53,6 +60,36 @@ export default function CourseSidebar({
       : priceMin
         ? `From $${priceMin}`
         : null
+
+  // Check if this course is already added to the specific trip
+  useEffect(() => {
+    if (!tripId || !courseId) return
+    supabase
+      .from('trip_courses')
+      .select('id')
+      .eq('trip_id', tripId)
+      .eq('course_id', courseId)
+      .single()
+      .then(({ data }) => { if (data) setAdded(true) })
+  }, [tripId, courseId])
+
+  async function handleDirectAdd() {
+    if (!tripId || !courseId || !session?.access_token) return
+    setAddLoading(true)
+    try {
+      const res = await fetch(`/api/trips/${tripId}/courses`, {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ courseId }),
+      })
+      if (res.ok) setAdded(true)
+    } finally {
+      setAddLoading(false)
+    }
+  }
 
   return (
     <>
@@ -67,14 +104,7 @@ export default function CourseSidebar({
             textAlign:    'center',
           }}
         >
-          <div
-            style={{
-              fontSize:      '22px',
-              marginBottom:  '8px',
-            }}
-          >
-            ✦
-          </div>
+          <div style={{ fontSize: '22px', marginBottom: '8px' }}>✦</div>
           <div
             style={{
               fontFamily:   'var(--font-serif)',
@@ -84,7 +114,7 @@ export default function CourseSidebar({
               marginBottom: '6px',
             }}
           >
-            Ready to play here?
+            {added ? 'On your trip ✓' : 'Ready to play here?'}
           </div>
           <div
             style={{
@@ -95,30 +125,59 @@ export default function CourseSidebar({
               lineHeight:   1.5,
             }}
           >
-            Add this course to one of your trips.
+            {added
+              ? `${courseName} is already on this trip.`
+              : 'Add this course to one of your trips.'}
           </div>
-          <button
-            onClick={() => setModalOpen(true)}
-            style={{
-              width:         '100%',
-              padding:       '12px 20px',
-              background:    'var(--gold)',
-              color:         'var(--green-deep)',
-              border:        'none',
-              borderRadius:  'var(--radius-sm)',
-              fontSize:      '12px',
-              fontWeight:    700,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              cursor:        'pointer',
-              fontFamily:    'var(--font-sans)',
-              transition:    'opacity 0.2s',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
-            onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
-          >
-            + Add to Trip
-          </button>
+
+          {tripId ? (
+            // Direct add — we know exactly which trip
+            <button
+              onClick={handleDirectAdd}
+              disabled={added || addLoading}
+              style={{
+                width:         '100%',
+                padding:       '12px 20px',
+                background:    added ? 'rgba(255,255,255,0.15)' : 'var(--gold)',
+                color:         added ? 'var(--gold-light)' : 'var(--green-deep)',
+                border:        added ? '1px solid rgba(255,255,255,0.2)' : 'none',
+                borderRadius:  'var(--radius-sm)',
+                fontSize:      '12px',
+                fontWeight:    700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                cursor:        added || addLoading ? 'default' : 'pointer',
+                fontFamily:    'var(--font-sans)',
+                transition:    'all 0.2s',
+              }}
+            >
+              {added ? '✓ Added to Trip' : addLoading ? 'Adding…' : '+ Add to Trip'}
+            </button>
+          ) : (
+            // Modal — user picks which trip
+            <button
+              onClick={() => setModalOpen(true)}
+              style={{
+                width:         '100%',
+                padding:       '12px 20px',
+                background:    'var(--gold)',
+                color:         'var(--green-deep)',
+                border:        'none',
+                borderRadius:  'var(--radius-sm)',
+                fontSize:      '12px',
+                fontWeight:    700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                cursor:        'pointer',
+                fontFamily:    'var(--font-sans)',
+                transition:    'opacity 0.2s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.opacity = '0.85')}
+              onMouseLeave={(e) => (e.currentTarget.style.opacity = '1')}
+            >
+              + Add to Trip
+            </button>
+          )}
         </div>
 
         {/* Key Details */}
@@ -261,10 +320,10 @@ export default function CourseSidebar({
                   <div>
                     <div
                       style={{
-                        fontSize:   '13px',
-                        fontWeight: 500,
-                        color:      'var(--green-deep)',
-                        lineHeight: 1.35,
+                        fontSize:     '13px',
+                        fontWeight:   500,
+                        color:        'var(--green-deep)',
+                        lineHeight:   1.35,
                         marginBottom: '2px',
                       }}
                     >
@@ -297,7 +356,7 @@ export default function CourseSidebar({
         )}
       </div>
 
-      {/* Add to Trip Modal */}
+      {/* Add to Trip Modal — only shown when no tripId (user picks trip) */}
       {modalOpen && (
         <AddToTripModal
           courseId={courseId}

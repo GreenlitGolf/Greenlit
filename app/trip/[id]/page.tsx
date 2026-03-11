@@ -35,9 +35,11 @@ type Member = {
 type ChatMessage = {
   id:           string
   role:         'user' | 'assistant'
-  content:      string       // displayed text (GREENLIT_PICKS stripped)
-  rawContent?:  string       // full API response (preserved for conversation history)
-  coursePicks?: CoursePickData[]
+  content:      string
+  rawContent?:  string       // kept for backward compat
+  coursePicks?: CoursePickData[]  // legacy field from old streaming format
+  courses?:     CoursePickData[]  // current field populated from API JSON response
+  loading?:     boolean      // true while awaiting API response
 }
 
 type ItineraryItem = {
@@ -109,17 +111,25 @@ function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
-function parseResponse(raw: string): { text: string; courses: CoursePickData[] } {
-  const match = raw.match(/GREENLIT_PICKS:\s*([\s\S]*?)\s*END_PICKS/)
-  let courses: CoursePickData[] = []
-  if (match) {
-    try { courses = JSON.parse(match[1].trim()) } catch { courses = [] }
+// Maps a DB MatchedCourse to the CoursePickData shape used by CourseCard
+function dbCourseToPick(c: {
+  id: string; slug: string; name: string; location: string
+  tags: string[]; price_min: number | null; price_max: number | null
+  emoji: string; google_place_id: string | null
+}): CoursePickData {
+  const price = c.price_min && c.price_max
+    ? `$${c.price_min}–$${c.price_max}/person est.`
+    : c.price_min ? `From $${c.price_min}/person est.` : 'Contact for rates'
+  return {
+    name:           c.name,
+    location:       c.location,
+    price,
+    emoji:          c.emoji || '⛳',
+    tags:           c.tags ?? [],
+    courseId:       c.slug,
+    courseUUID:     c.id,
+    googlePlaceId:  c.google_place_id ?? undefined,
   }
-  const text = raw
-    .replace(/GREENLIT_PICKS:[\s\S]*?END_PICKS/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-  return { text, courses }
 }
 
 // ─── Markdown renderer ────────────────────────────────────────────────────────
@@ -392,7 +402,7 @@ function TripConciergeSection({
     const history = [
       ...messages.filter((m) => m.id !== 'welcome'),
       userMsg,
-    ].map((m) => ({ role: m.role, content: m.rawContent ?? m.content }))
+    ].map((m) => ({ role: m.role, content: m.content }))
 
     setMessages((prev) => [...prev, userMsg])
     setInput('')
@@ -401,8 +411,9 @@ function TripConciergeSection({
     // Persist user message immediately
     await persistMessage('user', text)
 
+    // Add a loading placeholder for the assistant reply
     const assistantId = (Date.now() + 1).toString()
-    setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }])
+    setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '', loading: true }])
 
     try {
       const res = await fetch('/api/concierge', {
@@ -413,40 +424,28 @@ function TripConciergeSection({
           tripContext: buildTripContext(),
         }),
       })
-      if (!res.ok || !res.body) throw new Error('Stream failed')
+      if (!res.ok) throw new Error('Request failed')
 
-      const reader  = res.body.getReader()
-      const decoder = new TextDecoder()
-      let   raw     = ''
+      const data: { message: string; courses?: Array<{
+        id: string; slug: string; name: string; location: string
+        tags: string[]; price_min: number | null; price_max: number | null
+        emoji: string; google_place_id: string | null
+      }> } = await res.json()
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        raw += decoder.decode(value, { stream: true })
-
-        const displayText = raw
-          .replace(/GREENLIT_PICKS:[\s\S]*?(END_PICKS|$)/g, '')
-          .replace(/\[ENRICH_COURSE:[^\]]*\]/g, '')
-          .replace(/\n{3,}/g, '\n\n')
-          .trim()
-
-        setMessages((prev) =>
-          prev.map((m) => m.id === assistantId ? { ...m, content: displayText } : m)
-        )
-      }
-
-      // Parse ENRICH_COURSE marker before stripping it
-      const enrichMatch = raw.match(
+      // Check for ENRICH_COURSE marker in the message text
+      const enrichMatch = data.message.match(
         /\[ENRICH_COURSE:\s*"([^"]+)"\s*\|\s*"([^"]+)"\s*\|\s*"([^"]+)"\s*\]/,
       )
+      const finalText = data.message
+        .replace(/\[ENRICH_COURSE:[^\]]*\]/g, '')
+        .trim()
 
-      const cleanRaw    = raw.replace(/\[ENRICH_COURSE:[^\]]*\]/g, '')
-      const { text: finalText, courses } = parseResponse(cleanRaw)
+      const mappedCourses: CoursePickData[] = (data.courses ?? []).map(dbCourseToPick)
 
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, content: finalText, rawContent: raw, coursePicks: courses.length ? courses : undefined }
+            ? { ...m, content: finalText, loading: false, courses: mappedCourses.length ? mappedCourses : undefined }
             : m
         )
       )
@@ -457,13 +456,13 @@ function TripConciergeSection({
         triggerEnrichment(assistantId, courseName, courseLocation, courseCountry)
       }
 
-      // Persist assistant reply (display text, no markers)
+      // Persist assistant reply
       await persistMessage('assistant', finalText)
     } catch {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, content: 'Sorry, something went wrong. Please try again.' }
+            ? { ...m, content: 'Sorry, something went wrong. Please try again.', loading: false }
             : m
         )
       )
@@ -477,12 +476,34 @@ function TripConciergeSection({
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
   }
 
-  function handleAddToTrip(course: CoursePickData) {
-    setAddedCourses((prev) =>
-      prev.includes(course.name) ? prev : [...prev, course.name]
-    )
-    setAddedNotice(`"${course.name}" added to your trip.`)
-    setTimeout(() => setAddedNotice(null), 4000)
+  async function handleAddToTrip(course: CoursePickData) {
+    if (!course.courseUUID) {
+      // Fallback: course not in DB yet — just track locally until it's enriched
+      setAddedCourses((prev) => prev.includes(course.name) ? prev : [...prev, course.name])
+      setAddedNotice(`${course.name} noted — it's being added to the Greenlit database.`)
+      setTimeout(() => setAddedNotice(null), 4000)
+      return
+    }
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch(`/api/trips/${tripId}/courses`, {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ courseId: course.courseUUID }),
+      })
+
+      if (res.ok) {
+        setAddedCourses((prev) => prev.includes(course.name) ? prev : [...prev, course.name])
+        setAddedNotice(`${course.name} added to your trip ✓`)
+        setTimeout(() => setAddedNotice(null), 4000)
+      }
+    } catch {
+      // Silently fail — button state will remain un-added so user can retry
+    }
   }
 
   async function triggerEnrichment(msgId: string, name: string, location: string, country: string) {
@@ -582,38 +603,45 @@ function TripConciergeSection({
                   ✦
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', flex: 1 }}>
-                  {/* Text bubble */}
-                  {msg.content && (
-                    <div style={{
-                      background: 'var(--white)', border: '1px solid var(--cream-dark)',
-                      color: 'var(--text-dark)', padding: '12px 18px',
-                      borderRadius: '4px 16px 16px 16px', fontSize: '14px',
-                      fontWeight: 300, boxShadow: 'var(--shadow-subtle)',
-                    }}>
-                      <MarkdownText text={msg.content} />
-                      {streaming && msg.id === messages[messages.length - 1]?.id && (
-                        <span style={{
-                          display: 'inline-block', width: '2px', height: '14px',
-                          background: 'var(--green-light)', marginLeft: '2px',
-                          verticalAlign: 'middle', animation: 'blink 1s step-end infinite',
-                        }} />
-                      )}
-                    </div>
-                  )}
-                  {/* Course cards */}
-                  {msg.coursePicks && msg.coursePicks.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div style={{
-                        fontSize: '9px', letterSpacing: '0.2em', textTransform: 'uppercase',
-                        color: 'var(--green-muted)', fontWeight: 600,
-                      }}>
-                        Greenlit Picks
+                  {/* Text bubble — or typing dots while loading */}
+                  <div style={{
+                    background: 'var(--white)', border: '1px solid var(--cream-dark)',
+                    color: 'var(--text-dark)', padding: '12px 18px',
+                    borderRadius: '4px 16px 16px 16px', fontSize: '14px',
+                    fontWeight: 300, boxShadow: 'var(--shadow-subtle)',
+                  }}>
+                    {msg.loading ? (
+                      <div style={{ display: 'flex', gap: '5px', alignItems: 'center', padding: '2px 0' }}>
+                        {[0, 1, 2].map((i) => (
+                          <span key={i} style={{
+                            display: 'inline-block', width: '7px', height: '7px',
+                            borderRadius: '50%', background: 'var(--green-light)',
+                            animation: `typingBounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+                          }} />
+                        ))}
                       </div>
-                      {msg.coursePicks.map((course, i) => (
-                        <CourseCard key={i} course={course} onAddToTrip={handleAddToTrip} tripId={tripId} />
-                      ))}
-                    </div>
-                  )}
+                    ) : (
+                      <MarkdownText text={msg.content} />
+                    )}
+                  </div>
+                  {/* Course cards — from new JSON response or legacy coursePicks */}
+                  {(() => {
+                    const picks = msg.courses ?? msg.coursePicks
+                    if (!picks || picks.length === 0) return null
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div style={{
+                          fontSize: '9px', letterSpacing: '0.2em', textTransform: 'uppercase',
+                          color: 'var(--green-muted)', fontWeight: 600,
+                        }}>
+                          Greenlit Picks
+                        </div>
+                        {picks.map((course, i) => (
+                          <CourseCard key={i} course={course} onAddToTrip={handleAddToTrip} tripId={tripId} />
+                        ))}
+                      </div>
+                    )
+                  })()}
 
                   {/* Enrichment notice */}
                   {enrichNotices[msg.id] && (() => {
@@ -712,7 +740,13 @@ function TripConciergeSection({
         </p>
       </div>
 
-      <style>{`@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }`}</style>
+      <style>{`
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+        @keyframes typingBounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+          40%            { transform: translateY(-5px); opacity: 1; }
+        }
+      `}</style>
     </div>
   )
 }

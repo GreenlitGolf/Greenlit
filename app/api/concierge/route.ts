@@ -1,5 +1,6 @@
-import { NextRequest } from 'next/server'
-import { anthropic } from '@/lib/anthropic'
+import { NextRequest }                 from 'next/server'
+import { anthropic }                  from '@/lib/anthropic'
+import { createServerSupabaseClient } from '@/lib/supabase-server'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -13,7 +14,70 @@ export interface TripContext {
   memberCount?:  number
   startDate?:    string
   endDate?:      string
-  addedCourses?: string[]   // course names already added to the trip
+  addedCourses?: string[]
+}
+
+export interface MatchedCourse {
+  id:              string
+  slug:            string
+  name:            string
+  location:        string
+  tags:            string[]
+  price_min:       number | null
+  price_max:       number | null
+  emoji:           string
+  google_place_id: string | null
+}
+
+type CourseRow = {
+  name               : string
+  location           : string
+  country            : string | null
+  tagline            : string | null
+  description        : string | null
+  why_its_great      : string[]
+  price_min          : number | null
+  price_max          : number | null
+  tags               : string[]
+  walking_friendly   : boolean
+  caddie_available   : boolean
+  best_time_to_visit : string | null
+  slug               : string
+}
+
+// ─── DB course lookup ─────────────────────────────────────────────────────────
+
+async function findRelevantCourses(query: string): Promise<CourseRow[]> {
+  if (!query.trim()) return []
+
+  const supabase = createServerSupabaseClient()
+
+  // Simple keyword search across name + location — good enough for the concierge
+  const term = query.replace(/[%_]/g, '').slice(0, 60) // sanitise before ILIKE
+
+  const { data } = await supabase
+    .from('courses')
+    .select(
+      'name, location, country, tagline, description, why_its_great, price_min, price_max, tags, walking_friendly, caddie_available, best_time_to_visit, slug',
+    )
+    .or(`name.ilike.%${term}%,location.ilike.%${term}%,tags.cs.{${term}}`)
+    .limit(5)
+
+  return (data ?? []) as CourseRow[]
+}
+
+async function lookupCourseByName(name: string): Promise<MatchedCourse | null> {
+  const supabase = createServerSupabaseClient()
+  const term = name.replace(/[%_]/g, '').slice(0, 80)
+
+  const { data } = await supabase
+    .from('courses')
+    .select('id, slug, name, location, tags, price_min, price_max, emoji, google_place_id')
+    .ilike('name', `%${term}%`)
+    .limit(1)
+    .single()
+
+  return data as MatchedCourse | null
 }
 
 // ─── System prompt ────────────────────────────────────────────────────────────
@@ -22,60 +86,94 @@ const BASE_PROMPT = `You are the Greenlit golf concierge — a knowledgeable, wa
 
 1. GUIDED PLANNING: Help groups build a trip from scratch. Ask about travel dates, group size, budget, skill levels, preferred regions, and trip vibe (bucket list vs. value, walking vs. cart, links vs. parkland). Build toward concrete course recommendations.
 
-2. INSTANT DISCOVERY: When a user asks a direct browse query — "show me links courses in the Southeast under $400", "what are the best courses in Scottsdale?", "find me something bucket-list in Ireland" — respond with GREENLIT_PICKS immediately. Do not ask follow-up questions for browse queries. Return the cards first, then offer to refine.
+2. INSTANT DISCOVERY: When a user asks a direct browse query — "show me links courses in the Southeast under $400", "what are the best courses in Scottsdale?", "find me something bucket-list in Ireland" — recommend courses immediately with their names in double brackets. Do not ask follow-up questions for browse queries. Recommend first, then offer to refine.
 
 Key rules:
-- Return GREENLIT_PICKS any time you have enough signal to recommend courses (2–3 is ideal, max 3).
 - Keep prose responses short and conversational — this is a chat, not an essay.
 - Use light golf humor where it fits naturally.
 - Always move the conversation toward locking in a plan.
 - If a trip context is provided below, factor it into every recommendation automatically. Do not ask the user to repeat information already in the context.
+- When recommending 2–3 courses, put each on its own line so the UI can display course cards.
 
-COURSE CARD FORMAT — use EXACTLY this structure, on its own lines, after your conversational text:
+COURSE RECOMMENDATION FORMAT:
+When recommending specific courses, always wrap their exact name in double brackets so the system can look them up and show the user a course card:
 
-GREENLIT_PICKS:
-[{"name":"Course Name","location":"City, State","price":"$X–$Y/person est.","emoji":"⛳","rating":4.5,"tags":["Tag1","Tag2","Tag3"],"courseId":"slug-here","whyItFits":"One sentence connecting this course to the group's specific situation."}]
-END_PICKS
+[[Forest Dunes Golf Club]] is a must for your group — perfect for the walk-and-carry vibe you're after.
 
-- rating: number from 1.0 to 5.0 (your honest assessment — vary this, don't always give 5.0)
-- tags: 2–3 short descriptors (e.g. "Links", "Championship", "Walking-friendly", "Under $300", "Resort")
-- emoji: use a relevant golf or landscape emoji
-- courseId: the URL slug for that course if it's one of the Greenlit flagship courses listed below; omit or set to "" for all others
-- whyItFits: one short, specific sentence explaining why this course suits THIS group — reference their actual budget, group size, dates, or vibe. Never generic ("great course"); always personal ("Fits your $300 budget with room for a post-round beer").
-- Do not use markdown inside the picks block.
+You can mention multiple courses:
+[[Pebble Beach Golf Links]] and [[Bandon Dunes Golf Resort]] are both iconic bucket-list experiences.
 
-GREENLIT FLAGSHIP COURSE SLUGS (use these exact courseId values when recommending these courses):
-- Pebble Beach Golf Links → "pebble-beach"
-- Sand Valley Golf Resort → "sand-valley"
-- Bandon Dunes Golf Resort → "bandon-dunes"
-- Pinehurst Resort → "pinehurst"
-- TPC Sawgrass → "tpc-sawgrass"
-- Whistling Straits → "whistling-straits"
-- Harbour Town Golf Links → "harbour-town"
-- Sea Island Golf Club → "sea-island"
-- Streamsong Resort → "streamsong"
-- Kiawah Island Ocean Course → "kiawah-island-ocean-course"`
+Rules for double brackets:
+- Only use double brackets for real, public golf courses you are confident about
+- Use the most common/official name of the course (e.g. "Pebble Beach Golf Links" not just "Pebble Beach")
+- Do not use double brackets for vague references ("a links course") or private clubs
+- 2–3 recommended courses per response is ideal; max 4
+- After your conversational text, you can follow up with a line per recommended course giving a one-sentence "why it fits this group" note
 
-function buildSystemPrompt(ctx?: TripContext): string {
-  if (!ctx) return BASE_PROMPT
+GREENLIT FLAGSHIP COURSES (always use double brackets when mentioning these):
+- [[Pebble Beach Golf Links]] — pebble-beach
+- [[Sand Valley Golf Resort]] — sand-valley
+- [[Bandon Dunes Golf Resort]] — bandon-dunes
+- [[Pinehurst Resort]] — pinehurst
+- [[TPC Sawgrass]] — tpc-sawgrass
+- [[Whistling Straits]] — whistling-straits
+- [[Harbour Town Golf Links]] — harbour-town
+- [[Sea Island Golf Club]] — sea-island
+- [[Streamsong Resort]] — streamsong
+- [[Kiawah Island Ocean Course]] — kiawah-island-ocean-course
+- [[Forest Dunes Golf Club]] — forest-dunes
 
-  const lines: string[] = []
+UNKNOWN COURSE HANDLING:
+When a user asks about a specific golf course that is NOT in the GREENLIT DATABASE CONTEXT below:
+1. Answer from your own knowledge — be genuinely helpful and specific.
+2. Be honest that you're drawing on general knowledge, not the Greenlit database.
+3. End your response with this exact marker on its own line (no markdown around it):
+   [ENRICH_COURSE: "Full Course Name" | "City, Region" | "Country"]
+4. Only emit this marker once per response, for the primary course the user asked about.
+5. Do not emit the marker for courses already in the database context, or for very obscure courses you know little about.`
 
-  if (ctx.tripName)    lines.push(`Trip name: ${ctx.tripName}`)
-  if (ctx.memberCount) lines.push(`Group size: ${ctx.memberCount} golfer${ctx.memberCount !== 1 ? 's' : ''}`)
-  if (ctx.startDate && ctx.endDate)
-    lines.push(`Travel dates: ${ctx.startDate} to ${ctx.endDate}`)
-  else if (ctx.startDate)
-    lines.push(`Travel from: ${ctx.startDate}`)
-  else if (ctx.endDate)
-    lines.push(`Travel until: ${ctx.endDate}`)
+function buildSystemPrompt(ctx?: TripContext, dbCourses?: CourseRow[]): string {
+  const parts: string[] = [BASE_PROMPT]
 
-  if (ctx.addedCourses && ctx.addedCourses.length > 0)
-    lines.push(`Courses already on the itinerary: ${ctx.addedCourses.join(', ')} — avoid recommending these again unless asked.`)
+  if (dbCourses && dbCourses.length > 0) {
+    const courseJson = dbCourses.map((c) => ({
+      name             : c.name,
+      slug             : c.slug,
+      location         : c.location,
+      tagline          : c.tagline,
+      price            : c.price_min && c.price_max
+        ? `$${c.price_min}–$${c.price_max}`
+        : c.price_min ? `from $${c.price_min}` : null,
+      tags             : c.tags,
+      walking_friendly : c.walking_friendly,
+      caddie_available : c.caddie_available,
+      best_time_to_visit: c.best_time_to_visit,
+      why_its_great    : c.why_its_great?.slice(0, 2), // keep prompt lean
+    }))
+    parts.push(
+      `\n--- GREENLIT DATABASE CONTEXT (use this data when discussing these courses) ---\n${JSON.stringify(courseJson, null, 2)}\n---`,
+    )
+  }
 
-  if (lines.length === 0) return BASE_PROMPT
+  if (ctx) {
+    const lines: string[] = []
+    if (ctx.tripName)    lines.push(`Trip name: ${ctx.tripName}`)
+    if (ctx.memberCount) lines.push(`Group size: ${ctx.memberCount} golfer${ctx.memberCount !== 1 ? 's' : ''}`)
+    if (ctx.startDate && ctx.endDate)
+      lines.push(`Travel dates: ${ctx.startDate} to ${ctx.endDate}`)
+    else if (ctx.startDate)
+      lines.push(`Travel from: ${ctx.startDate}`)
+    else if (ctx.endDate)
+      lines.push(`Travel until: ${ctx.endDate}`)
+    if (ctx.addedCourses && ctx.addedCourses.length > 0)
+      lines.push(`Courses already on the itinerary: ${ctx.addedCourses.join(', ')} — avoid recommending these again unless asked.`)
 
-  return `${BASE_PROMPT}\n\n--- CURRENT TRIP CONTEXT (use automatically, do not ask user to repeat) ---\n${lines.join('\n')}\n---`
+    if (lines.length > 0) {
+      parts.push(`\n--- CURRENT TRIP CONTEXT (use automatically, do not ask user to repeat) ---\n${lines.join('\n')}\n---`)
+    }
+  }
+
+  return parts.join('')
 }
 
 // ─── Route handler ────────────────────────────────────────────────────────────
@@ -86,53 +184,54 @@ export async function POST(req: NextRequest) {
     const { messages, tripContext } = body
 
     if (!messages || messages.length === 0) {
-      return new Response('Messages are required', { status: 400 })
+      return Response.json({ error: 'Messages are required' }, { status: 400 })
     }
 
-    const systemPrompt = buildSystemPrompt(tripContext)
-    const encoder      = new TextEncoder()
+    // Look up relevant courses from DB based on last user message
+    const lastUserText = messages.filter((m) => m.role === 'user').at(-1)?.content ?? ''
+    const dbCourses    = await findRelevantCourses(lastUserText)
 
-    const readable = new ReadableStream({
-      async start(controller) {
-        try {
-          const stream = anthropic.messages.stream({
-            model:      'claude-opus-4-6',
-            max_tokens: 1024,
-            system:     systemPrompt,
-            messages:   messages.map((m) => ({
-              role:    m.role,
-              content: m.content,
-            })),
-          })
+    const systemPrompt = buildSystemPrompt(tripContext, dbCourses)
 
-          await new Promise<void>((resolve, reject) => {
-            stream.on('text', (textDelta) => {
-              controller.enqueue(encoder.encode(textDelta))
-            })
-            stream.on('end', () => {
-              controller.close()
-              resolve()
-            })
-            stream.on('error', (err) => {
-              controller.error(err)
-              reject(err)
-            })
-          })
-        } catch (err) {
-          controller.error(err)
-        }
-      },
+    // Get full response (non-streaming for reliable course extraction)
+    const response = await anthropic.messages.create({
+      model:      'claude-opus-4-6',
+      max_tokens: 1024,
+      system:     systemPrompt,
+      messages:   messages.map((m) => ({
+        role:    m.role,
+        content: m.content,
+      })),
     })
 
-    return new Response(readable, {
-      headers: {
-        'Content-Type':      'text/plain; charset=utf-8',
-        'Transfer-Encoding': 'chunked',
-        'Cache-Control':     'no-cache',
-      },
-    })
+    const rawText = response.content
+      .filter((b) => b.type === 'text')
+      .map((b) => (b as { type: 'text'; text: string }).text)
+      .join('')
+
+    // ── Extract [[Course Name]] patterns ─────────────────────────────────────
+    const bracketPattern = /\[\[([^\]]+)\]\]/g
+    const mentionedNames = new Set<string>()
+    let match: RegExpExecArray | null
+    while ((match = bracketPattern.exec(rawText)) !== null) {
+      mentionedNames.add(match[1].trim())
+    }
+
+    // Look up each mentioned course in the DB
+    const courseResults = await Promise.all(
+      Array.from(mentionedNames).map((name) => lookupCourseByName(name))
+    )
+    const courses: MatchedCourse[] = courseResults.filter(Boolean) as MatchedCourse[]
+
+    // Strip [[...]] from the display text — keep just the plain name
+    const message = rawText
+      .replace(/\[\[([^\]]+)\]\]/g, '$1')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+
+    return Response.json({ message, courses })
   } catch (err) {
     console.error('Concierge API error:', err)
-    return new Response('Internal server error', { status: 500 })
+    return Response.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
