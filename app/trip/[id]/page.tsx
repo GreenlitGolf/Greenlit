@@ -2095,8 +2095,9 @@ export default function TripPage() {
             navItems={buildNavItems(members.length)}
             activeId={activeNav}
             onItemClick={(navId) => {
-                if (navId === 'report')    { router.push(`/trip/${id}/report`);    return }
-                if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`); return }
+                if (navId === 'report')    { router.push(`/trip/${id}/report`);         return }
+                if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);      return }
+                if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }
                 setEditing(false); setActiveNav(navId)
               }}
             tripName={trip.name}
