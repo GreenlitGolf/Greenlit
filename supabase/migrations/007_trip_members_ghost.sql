@@ -2,6 +2,9 @@
 -- Adds ghost member support to trip_members table
 -- Run this in the Supabase SQL Editor: https://supabase.com/dashboard/project/kafotvkzzkdqmxdkbsmz/sql
 
+-- Allow ghost members (user_id is null for non-registered members)
+ALTER TABLE trip_members ALTER COLUMN user_id DROP NOT NULL;
+
 ALTER TABLE trip_members
   ADD COLUMN IF NOT EXISTS display_name   text,
   ADD COLUMN IF NOT EXISTS email          text,
@@ -20,4 +23,4 @@ UPDATE trip_members tm
 SET role = 'organizer'
 FROM trips t
 WHERE tm.trip_id = t.id
-  AND tm.user_id = t.user_id;
+  AND tm.user_id = t.created_by;

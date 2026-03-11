@@ -67,8 +67,8 @@ export default function JoinPage() {
           return
         }
 
-        // Redirect to generic join page
-        router.replace(`/join/trip/${tripRow.id}`)
+        // Redirect to generic join page (pass the token itself, not the id)
+        router.replace(`/join/trip/${token}`)
         return
       }
 
