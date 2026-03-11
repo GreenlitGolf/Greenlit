@@ -23,6 +23,7 @@ type Trip = {
   end_date:     string | null
   invite_token: string
   created_by:   string
+  share_token:  string | null
 }
 
 type Member = {
@@ -283,6 +284,7 @@ const itinInputStyle: React.CSSProperties = {
 const NAV_ITEMS: NavItem[] = [
   { id: 'concierge', icon: '✦',  label: 'Golf Concierge',  href: '' },
   { id: 'itinerary', icon: '📅', label: 'Trip Itinerary',  href: '' },
+  { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
   { id: 'teetimes',  icon: '🕐', label: 'Tee Times',       href: '' },
   { id: 'hotels',    icon: '🏨', label: 'Accommodations',  href: '' },
   { id: 'group',     icon: '👥', label: 'Group & Members', href: '' },
@@ -292,6 +294,7 @@ const NAV_ITEMS: NavItem[] = [
 const SECTION_LABELS: Record<string, string> = {
   concierge: 'Golf Concierge',
   itinerary: 'Trip Itinerary',
+  report:    'Trip Report',
   teetimes:  'Tee Times',
   hotels:    'Accommodations',
   group:     'Group & Members',
@@ -329,6 +332,9 @@ function TripConciergeSection({
   const [streaming,    setStreaming]     = useState(false)
   const [addedCourses, setAddedCourses] = useState<string[]>([])
   const [addedNotice,  setAddedNotice]  = useState<string | null>(null)
+  const [enrichNotices, setEnrichNotices] = useState<Record<string, {
+    name: string; status: 'loading' | 'done' | 'queued' | 'private'; slug?: string
+  }>>({})
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef  = useRef<HTMLTextAreaElement>(null)
 
@@ -420,6 +426,7 @@ function TripConciergeSection({
 
         const displayText = raw
           .replace(/GREENLIT_PICKS:[\s\S]*?(END_PICKS|$)/g, '')
+          .replace(/\[ENRICH_COURSE:[^\]]*\]/g, '')
           .replace(/\n{3,}/g, '\n\n')
           .trim()
 
@@ -428,7 +435,14 @@ function TripConciergeSection({
         )
       }
 
-      const { text: finalText, courses } = parseResponse(raw)
+      // Parse ENRICH_COURSE marker before stripping it
+      const enrichMatch = raw.match(
+        /\[ENRICH_COURSE:\s*"([^"]+)"\s*\|\s*"([^"]+)"\s*\|\s*"([^"]+)"\s*\]/,
+      )
+
+      const cleanRaw    = raw.replace(/\[ENRICH_COURSE:[^\]]*\]/g, '')
+      const { text: finalText, courses } = parseResponse(cleanRaw)
+
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
@@ -437,7 +451,13 @@ function TripConciergeSection({
         )
       )
 
-      // Persist assistant reply (display text without GREENLIT_PICKS block)
+      // Fire background enrichment if marker was found
+      if (enrichMatch) {
+        const [, courseName, courseLocation, courseCountry] = enrichMatch
+        triggerEnrichment(assistantId, courseName, courseLocation, courseCountry)
+      }
+
+      // Persist assistant reply (display text, no markers)
       await persistMessage('assistant', finalText)
     } catch {
       setMessages((prev) =>
@@ -463,6 +483,31 @@ function TripConciergeSection({
     )
     setAddedNotice(`"${course.name}" added to your trip.`)
     setTimeout(() => setAddedNotice(null), 4000)
+  }
+
+  async function triggerEnrichment(msgId: string, name: string, location: string, country: string) {
+    setEnrichNotices((prev) => ({ ...prev, [msgId]: { name, status: 'loading' } }))
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/courses/enrich-on-demand', {
+        method : 'POST',
+        headers: {
+          'Content-Type' : 'application/json',
+          'Authorization': `Bearer ${session?.access_token ?? ''}`,
+        },
+        body: JSON.stringify({ name, location, country }),
+      })
+      const data = await res.json()
+      if (data.status === 'complete' || data.status === 'exists') {
+        setEnrichNotices((prev) => ({ ...prev, [msgId]: { name, status: 'done', slug: data.slug } }))
+      } else if (data.status === 'private') {
+        setEnrichNotices((prev) => ({ ...prev, [msgId]: { name, status: 'private' } }))
+      } else {
+        setEnrichNotices((prev) => ({ ...prev, [msgId]: { name, status: 'queued' } }))
+      }
+    } catch {
+      setEnrichNotices((prev) => ({ ...prev, [msgId]: { name, status: 'queued' } }))
+    }
   }
 
   return (
@@ -569,6 +614,42 @@ function TripConciergeSection({
                       ))}
                     </div>
                   )}
+
+                  {/* Enrichment notice */}
+                  {enrichNotices[msg.id] && (() => {
+                    const n = enrichNotices[msg.id]
+                    return (
+                      <div style={{
+                        fontSize     : '12px',
+                        color        : n.status === 'done' ? 'var(--green-light)' : 'var(--text-light)',
+                        display      : 'flex',
+                        alignItems   : 'center',
+                        gap          : '6px',
+                        fontWeight   : 300,
+                        paddingLeft  : '2px',
+                      }}>
+                        {n.status === 'loading' && (
+                          <><span style={{ opacity: 0.7 }}>✦</span> Adding {n.name} to the Greenlit database…</>
+                        )}
+                        {n.status === 'queued' && (
+                          <><span style={{ opacity: 0.7 }}>✦</span> {n.name} is being researched — full details coming soon</>
+                        )}
+                        {n.status === 'private' && (
+                          <><span style={{ opacity: 0.5 }}>🔒</span> {n.name} appears to be a private club</>
+                        )}
+                        {n.status === 'done' && n.slug && (
+                          <><span>✦</span> {n.name} has been added —{' '}
+                            <a
+                              href={`/course/${n.slug}`}
+                              style={{ color: 'var(--gold)', fontWeight: 500, textDecoration: 'none' }}
+                            >
+                              View Course →
+                            </a>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
             )}
@@ -736,12 +817,14 @@ function GroupSection({
 // ─── Section: Trip Itinerary ──────────────────────────────────────────────────
 
 function TripItinerarySection({
-  tripId, trip, memberCount, currentUserId,
+  tripId, trip, memberCount, currentUserId, isOrganizer, shareToken,
 }: {
   tripId:        string
   trip:          Trip
   memberCount:   number
   currentUserId: string | undefined
+  isOrganizer:   boolean
+  shareToken:    string | null
 }) {
   const [items,        setItems]        = useState<ItineraryItem[]>([])
   const [loading,      setLoading]      = useState(true)
@@ -752,16 +835,31 @@ function TripItinerarySection({
   const [drawerForm,   setDrawerForm]   = useState<ItineraryForm>({
     day_number: 1, start_time: '', title: '', description: '', type: 'other', course_id: '',
   })
-  const [drawerSaving, setDrawerSaving] = useState(false)
-  const [confirmDelId, setConfirmDelId] = useState<string | null>(null)
-  const [regenConfirm, setRegenConfirm] = useState(false)
-  const [genCount,     setGenCount]     = useState(0)
+  const [drawerSaving,    setDrawerSaving]    = useState(false)
+  const [confirmDelId,    setConfirmDelId]    = useState<string | null>(null)
+  const [regenConfirm,    setRegenConfirm]    = useState(false)
+  const [genCount,        setGenCount]        = useState(0)
+  const [customizeOpen,   setCustomizeOpen]   = useState(false)
+  const [shareOpen,       setShareOpen]       = useState(false)
+  const [cTagline,        setCTagline]        = useState('')
+  const [cDayNotes,       setCDayNotes]       = useState<Record<string, string>>({})
+  const [cCoverUrl,       setCCoverUrl]       = useState('')
+  const [customizeSaving, setCustomizeSaving] = useState(false)
+  const [customizeSaved,  setCustomizeSaved]  = useState(false)
+  const [copyLabel,       setCopyLabel]       = useState<string | null>(null)
+  const [uploading,       setUploading]       = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const tripDays = getTripDays(trip.start_date, trip.end_date)
+
+  const appUrl     = typeof window !== 'undefined' ? window.location.origin : ''
+  const shareUrl   = shareToken ? `${appUrl}/share/${shareToken}` : null
+  const brochureUrl = shareToken ? `${appUrl}/share/${shareToken}/brochure` : null
 
   useEffect(() => {
     fetchItems()
     fetchTripCourses()
+    fetchCustomizations()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId])
 
@@ -846,6 +944,52 @@ function TripItinerarySection({
     await supabase.from('itinerary_items').delete().eq('id', id)
     setItems((prev) => prev.filter((i) => i.id !== id))
     setConfirmDelId(null)
+  }
+
+  async function fetchCustomizations() {
+    const { data } = await supabase
+      .from('trip_report_customizations')
+      .select('tagline, day_notes, cover_photo_url')
+      .eq('trip_id', tripId)
+      .single()
+    if (data) {
+      setCTagline(data.tagline ?? '')
+      setCDayNotes((data.day_notes as Record<string, string>) ?? {})
+      setCCoverUrl(data.cover_photo_url ?? '')
+    }
+  }
+
+  async function saveCustomizations() {
+    setCustomizeSaving(true)
+    await supabase.from('trip_report_customizations').upsert({
+      trip_id:         tripId,
+      tagline:         cTagline.trim() || null,
+      day_notes:       cDayNotes,
+      cover_photo_url: cCoverUrl || null,
+      updated_at:      new Date().toISOString(),
+    })
+    setCustomizeSaving(false)
+    setCustomizeSaved(true)
+    setTimeout(() => setCustomizeSaved(false), 2500)
+  }
+
+  async function copyLink(text: string, label: string) {
+    await navigator.clipboard.writeText(text)
+    setCopyLabel(label)
+    setTimeout(() => setCopyLabel(null), 2000)
+  }
+
+  async function uploadCoverPhoto(file: File) {
+    setUploading(true)
+    const ext  = file.name.split('.').pop() ?? 'jpg'
+    const path = `${tripId}/cover.${ext}`
+    const { data, error } = await supabase.storage
+      .from('trip-photos').upload(path, file, { upsert: true })
+    if (!error && data) {
+      const { data: urlData } = supabase.storage.from('trip-photos').getPublicUrl(path)
+      setCCoverUrl(urlData.publicUrl)
+    }
+    setUploading(false)
   }
 
   async function generateItinerary() {
@@ -1021,6 +1165,36 @@ function TripItinerarySection({
               >
                 + Add Item
               </button>
+
+              {/* Report buttons — organizer only */}
+              {isOrganizer && shareToken && (
+                <>
+                  <button
+                    onClick={() => { setCustomizeOpen(true); setShareOpen(false) }}
+                    style={{
+                      background: 'transparent', border: '1px solid var(--cream-dark)',
+                      borderRadius: 'var(--radius-md)', padding: '9px 16px',
+                      fontSize: '12px', fontWeight: 500, cursor: 'pointer',
+                      fontFamily: 'var(--font-sans)', color: 'var(--text-mid)',
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                    }}
+                  >
+                    ✦ Customize Report
+                  </button>
+                  <button
+                    onClick={() => { setShareOpen((p) => !p); setCustomizeOpen(false) }}
+                    style={{
+                      background: 'var(--green-deep)', border: 'none',
+                      borderRadius: 'var(--radius-md)', padding: '9px 16px',
+                      fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                      fontFamily: 'var(--font-sans)', color: 'var(--gold-light)',
+                      display: 'flex', alignItems: 'center', gap: '6px',
+                    }}
+                  >
+                    ↗ Share Report
+                  </button>
+                </>
+              )}
             </div>
 
             {/* Timeline — keyed on genCount so cards re-animate after generation */}
@@ -1404,6 +1578,172 @@ function TripItinerarySection({
         </>
       )}
 
+      {/* ── Share popover backdrop ── */}
+      {shareOpen && (
+        <div onClick={() => setShareOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
+      )}
+
+      {/* ── Share popover ── */}
+      {shareOpen && shareUrl && (
+        <div style={{
+          position: 'fixed', top: '80px', right: '48px',
+          background: 'var(--white)', border: '1px solid var(--cream-dark)',
+          borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.14)',
+          padding: '20px', width: '320px', zIndex: 60,
+          animation: 'itin-fadeUp 0.15s ease',
+        }}>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: '16px', color: 'var(--green-deep)', fontWeight: 600, marginBottom: '16px' }}>
+            Share Trip Report
+          </div>
+          {[
+            { label: 'Quick View', url: shareUrl,    key: 'quick' },
+            { label: 'Brochure',   url: brochureUrl!, key: 'brochure' },
+          ].map(({ label, url, key }) => (
+            <div key={key} style={{ marginBottom: '12px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-light)', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '5px' }}>{label}</div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <input
+                  readOnly value={url}
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                  style={{
+                    flex: 1, padding: '8px 10px', borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--cream-dark)', background: 'var(--cream)',
+                    fontSize: '12px', color: 'var(--text-mid)', fontFamily: 'var(--font-sans)',
+                    outline: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                />
+                <button
+                  onClick={() => copyLink(url, key)}
+                  style={{
+                    padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: 'none',
+                    background: copyLabel === key ? 'var(--green-light)' : 'var(--green-deep)',
+                    color: 'var(--gold-light)', fontSize: '12px', fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'var(--font-sans)', flexShrink: 0,
+                  }}
+                >
+                  {copyLabel === key ? '✓' : 'Copy'}
+                </button>
+              </div>
+            </div>
+          ))}
+          <div style={{ borderTop: '1px solid var(--cream-dark)', paddingTop: '12px' }}>
+            <button
+              onClick={() => { setShareOpen(false); window.print() }}
+              style={{
+                width: '100%', padding: '10px', borderRadius: 'var(--radius-md)',
+                background: 'var(--cream)', border: '1px solid var(--cream-dark)',
+                color: 'var(--text-mid)', fontSize: '12px', fontWeight: 500,
+                cursor: 'pointer', fontFamily: 'var(--font-sans)',
+              }}
+            >
+              ⎙ Download PDF
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Customize drawer backdrop ── */}
+      {customizeOpen && (
+        <div onClick={() => setCustomizeOpen(false)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 50 }} />
+      )}
+
+      {/* ── Customize Report drawer ── */}
+      {customizeOpen && (
+        <>
+          <div style={{
+            position: 'fixed', top: 0, right: 0, bottom: 0, width: '400px',
+            background: 'var(--white)', zIndex: 51, display: 'flex', flexDirection: 'column',
+            boxShadow: '-4px 0 32px rgba(0,0,0,0.15)',
+            animation: 'itin-slideIn 0.22s ease',
+          }}>
+            {/* Header */}
+            <div style={{ padding: '24px 28px 18px', borderBottom: '1px solid var(--cream-dark)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '20px', color: 'var(--green-deep)', fontWeight: 600 }}>Customize Report</div>
+              <button onClick={() => setCustomizeOpen(false)} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: 'var(--text-light)', lineHeight: 1 }}>×</button>
+            </div>
+
+            {/* Body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
+
+              {/* Tagline */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={itinLabelStyle}>Trip Tagline</label>
+                <input
+                  type="text" value={cTagline} maxLength={100}
+                  onChange={(e) => setCTagline(e.target.value)}
+                  placeholder="Five guys. Four courses. One unforgettable week."
+                  style={itinInputStyle}
+                />
+                <div style={{ fontSize: '11px', color: 'var(--text-light)', textAlign: 'right' }}>{cTagline.length}/100</div>
+              </div>
+
+              {/* Day notes */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                <div style={itinLabelStyle}>Day Notes</div>
+                {tripDays.map(({ dayNum }) => (
+                  <div key={dayNum} style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <label style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 500, fontFamily: 'var(--font-sans)' }}>Day {dayNum}</label>
+                    <textarea
+                      rows={2}
+                      value={cDayNotes[String(dayNum)] ?? ''}
+                      onChange={(e) => setCDayNotes((prev) => ({ ...prev, [String(dayNum)]: e.target.value }))}
+                      placeholder={`Add a note for the group about Day ${dayNum}…`}
+                      style={{ ...itinInputStyle, resize: 'vertical' }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Group photo */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={itinLabelStyle}>Group Photo</div>
+                <p style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: 300, margin: 0 }}>Shown as a circular inset on the brochure cover.</p>
+                {cCoverUrl ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <img src={cCoverUrl} alt="Cover" style={{ width: '56px', height: '56px', borderRadius: '50%', objectFit: 'cover' }} />
+                    <button onClick={() => setCCoverUrl('')} style={{ fontSize: '11px', color: '#c0392b', background: 'transparent', border: '1px solid rgba(192,57,43,0.3)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>Remove</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    style={{
+                      border: '2px dashed var(--cream-dark)', borderRadius: '10px',
+                      padding: '18px', background: 'var(--cream)', cursor: uploading ? 'wait' : 'pointer',
+                      color: 'var(--text-light)', fontSize: '13px', fontFamily: 'var(--font-sans)',
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px',
+                    }}
+                  >
+                    <span style={{ fontSize: '20px' }}>📷</span>
+                    {uploading ? 'Uploading…' : '+ Add group photo'}
+                  </button>
+                )}
+                <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadCoverPhoto(f) }}
+                />
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{ padding: '16px 28px', borderTop: '1px solid var(--cream-dark)', flexShrink: 0 }}>
+              <button
+                onClick={saveCustomizations}
+                disabled={customizeSaving}
+                style={{
+                  width: '100%', padding: '13px', borderRadius: 'var(--radius-md)', border: 'none',
+                  background: customizeSaved ? 'var(--green-light)' : 'var(--green-deep)',
+                  color: 'var(--gold-light)', fontSize: '14px', fontWeight: 600,
+                  cursor: customizeSaving ? 'wait' : 'pointer',
+                  fontFamily: 'var(--font-sans)', letterSpacing: '0.05em', transition: 'all 0.2s',
+                }}
+              >
+                {customizeSaving ? 'Saving…' : customizeSaved ? '✓ Saved!' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
       <style>{`
         @keyframes itin-spin    { from { transform: rotate(0deg)  } to { transform: rotate(360deg) } }
         @keyframes itin-fadeUp  { from { opacity: 0; transform: translateY(8px)  } to { opacity: 1; transform: translateY(0) } }
@@ -1501,7 +1841,10 @@ export default function TripPage() {
           <Sidebar
             navItems={NAV_ITEMS}
             activeId={activeNav}
-            onItemClick={(id) => { setEditing(false); setActiveNav(id) }}
+            onItemClick={(navId) => {
+                if (navId === 'report') { router.push(`/trip/${id}/report`); return }
+                setEditing(false); setActiveNav(navId)
+              }}
             tripName={trip.name}
             tripMeta={buildTripMeta(trip.start_date, trip.end_date, members.length)}
             groupName="The Crew"
@@ -1570,6 +1913,8 @@ export default function TripPage() {
                   trip={trip}
                   memberCount={members.length}
                   currentUserId={session?.user.id}
+                  isOrganizer={isOrganizer}
+                  shareToken={trip.share_token}
                 />
               ) : (
                 <div style={{ padding: '36px 48px' }}>
