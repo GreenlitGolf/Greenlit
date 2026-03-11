@@ -317,7 +317,7 @@ export default async function BrochurePage({
         @media print {
           .no-print { display: none !important; }
           .page-break { page-break-before: always; }
-          .cover-section { height: 100vh !important; page-break-after: always; }
+          .cover-section { height: 100vh !important; overflow: hidden; }
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body { margin: 0; }
           @page { margin: 0; }
