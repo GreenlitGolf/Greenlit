@@ -10,11 +10,12 @@ export interface Message {
 }
 
 export interface TripContext {
-  tripName?:     string
-  memberCount?:  number
-  startDate?:    string
-  endDate?:      string
-  addedCourses?: string[]
+  tripName?:      string
+  memberCount?:   number
+  handicapRange?: string   // e.g. "4–18" or "scratch to 22"
+  startDate?:     string
+  endDate?:       string
+  addedCourses?:  string[]
 }
 
 export interface MatchedCourse {
@@ -158,7 +159,10 @@ function buildSystemPrompt(ctx?: TripContext, dbCourses?: CourseRow[]): string {
   if (ctx) {
     const lines: string[] = []
     if (ctx.tripName)    lines.push(`Trip name: ${ctx.tripName}`)
-    if (ctx.memberCount) lines.push(`Group size: ${ctx.memberCount} golfer${ctx.memberCount !== 1 ? 's' : ''}`)
+    if (ctx.memberCount) {
+      const hcpNote = ctx.handicapRange ? ` (handicaps: ${ctx.handicapRange})` : ''
+      lines.push(`Group size: ${ctx.memberCount} golfer${ctx.memberCount !== 1 ? 's' : ''}${hcpNote}`)
+    }
     if (ctx.startDate && ctx.endDate)
       lines.push(`Travel dates: ${ctx.startDate} to ${ctx.endDate}`)
     else if (ctx.startDate)

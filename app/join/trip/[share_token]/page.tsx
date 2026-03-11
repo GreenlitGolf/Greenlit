@@ -14,14 +14,6 @@ type TripInfo = {
   end_date: string | null
 }
 
-type MemberInfo = {
-  id: number
-  display_name: string | null
-  email: string | null
-  member_type: string
-  invite_status: string
-}
-
 function formatDate(date: string | null) {
   if (!date) return 'TBD'
   return new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
@@ -29,70 +21,42 @@ function formatDate(date: string | null) {
   })
 }
 
-// Member-specific invite link: /join/[invite_token]
-export default function JoinPage() {
-  const { token } = useParams() as { token: string }
+// Generic trip invite: /join/trip/[share_token]
+// Uses trips.invite_token — anyone with this link can join.
+export default function JoinTripPage() {
+  const { share_token } = useParams() as { share_token: string }
   const { session, loading: authLoading } = useAuth()
   const router = useRouter()
 
-  const [trip, setTrip]         = useState<TripInfo | null>(null)
-  const [member, setMember]     = useState<MemberInfo | null>(null)
+  const [trip, setTrip]           = useState<TripInfo | null>(null)
   const [alreadyIn, setAlreadyIn] = useState(false)
-  const [joining, setJoining]   = useState(false)
-  const [error, setError]       = useState('')
+  const [joining, setJoining]     = useState(false)
+  const [error, setError]         = useState('')
   const [pageLoading, setPageLoading] = useState(true)
 
   useEffect(() => {
     if (authLoading) return
 
     async function load() {
-      // Look up member-specific invite token
-      const { data: memberRow, error: memberErr } = await supabase
-        .from('trip_members')
-        .select('id, display_name, email, member_type, invite_status, trip_id')
-        .eq('invite_token', token)
+      const { data, error: tripErr } = await supabase
+        .from('trips')
+        .select('id, name, destination, start_date, end_date')
+        .eq('invite_token', share_token)
         .single()
 
-      if (memberErr || !memberRow) {
-        // Fall back: check trips.invite_token (legacy generic links)
-        const { data: tripRow, error: tripErr } = await supabase
-          .from('trips')
-          .select('id, name, destination, start_date, end_date')
-          .eq('invite_token', token)
-          .single()
-
-        if (tripErr || !tripRow) {
-          setError('This invite link is invalid or has expired.')
-          setPageLoading(false)
-          return
-        }
-
-        // Redirect to generic join page
-        router.replace(`/join/trip/${tripRow.id}`)
+      if (tripErr || !data) {
+        setError('This invite link is invalid or has expired.')
+        setPageLoading(false)
         return
       }
 
-      // Fetch trip info
-      const { data: tripData } = await supabase
-        .from('trips')
-        .select('id, name, destination, start_date, end_date')
-        .eq('id', memberRow.trip_id)
-        .single()
+      setTrip(data)
 
-      setMember(memberRow as MemberInfo)
-      setTrip(tripData)
-
-      // Check if already accepted
-      if (memberRow.invite_status === 'accepted' && memberRow.member_type === 'registered') {
-        setAlreadyIn(true)
-      }
-      // If logged in, check if this user is the ghost member being claimed
-      if (session && memberRow.member_type === 'ghost') {
-        // Already a member of this trip with their real account?
+      if (session) {
         const { data: existing } = await supabase
           .from('trip_members')
           .select('id')
-          .eq('trip_id', memberRow.trip_id)
+          .eq('trip_id', data.id)
           .eq('user_id', session.user.id)
           .single()
         if (existing) setAlreadyIn(true)
@@ -102,45 +66,31 @@ export default function JoinPage() {
     }
 
     load()
-  }, [token, authLoading, session, router])
+  }, [share_token, authLoading, session])
 
-  async function handleAccept() {
+  async function handleJoin() {
     if (!session) {
-      router.push(`/signup?next=/join/${token}`)
+      router.push(`/signup?next=/join/trip/${share_token}`)
       return
     }
-    if (!trip || !member) return
+    if (!trip) return
 
     setJoining(true)
 
-    // Claim the ghost member slot: update user_id + mark accepted
-    const { error: updateErr } = await supabase
-      .from('trip_members')
-      .update({
-        user_id:      session.user.id,
-        member_type:  'registered',
-        invite_status: 'accepted',
-        status:       'confirmed',
-      })
-      .eq('id', member.id)
+    const { error: insertErr } = await supabase.from('trip_members').insert({
+      trip_id:     trip.id,
+      user_id:     session.user.id,
+      status:      'confirmed',
+      member_type: 'registered',
+      invite_status: 'accepted',
+    })
 
-    if (updateErr) {
-      // Ghost slot already taken — insert fresh
-      const { error: insertErr } = await supabase.from('trip_members').insert({
-        trip_id:     trip.id,
-        user_id:     session.user.id,
-        status:      'confirmed',
-        member_type: 'registered',
-        invite_status: 'accepted',
-      })
-      if (insertErr) {
-        setError(insertErr.message)
-        setJoining(false)
-        return
-      }
+    if (insertErr) {
+      setError(insertErr.message)
+      setJoining(false)
+    } else {
+      router.push(`/trip/${trip.id}`)
     }
-
-    router.push(`/trip/${trip.id}`)
   }
 
   if (pageLoading) {
@@ -170,12 +120,6 @@ export default function JoinPage() {
           ⛳ Golf Trip Invite
         </div>
 
-        {member?.display_name && (
-          <p style={{ fontSize: '14px', color: '#71717a', marginBottom: '4px' }}>
-            Hey {member.display_name} —
-          </p>
-        )}
-
         <h1 style={{ fontSize: '24px', fontWeight: 700, color: '#14532d', margin: '0 0 6px' }}>
           {trip?.name}
         </h1>
@@ -203,18 +147,18 @@ export default function JoinPage() {
           </Link>
         ) : (
           <button
-            onClick={handleAccept}
+            onClick={handleJoin}
             disabled={joining}
             style={{ width: '100%', background: '#15803d', color: '#fff', padding: '14px', borderRadius: '10px', border: 'none', cursor: joining ? 'not-allowed' : 'pointer', fontWeight: 600, fontSize: '15px', opacity: joining ? 0.6 : 1 }}
           >
-            {joining ? 'Joining…' : session ? "Accept invite — I'm in" : 'Sign up to accept'}
+            {joining ? 'Joining…' : session ? "Join trip — I'm in" : 'Sign up to join'}
           </button>
         )}
 
         {!session && !alreadyIn && (
           <p style={{ fontSize: '12px', color: '#a1a1aa', textAlign: 'center', marginTop: '12px' }}>
             Already have an account?{' '}
-            <Link href={`/login?next=/join/${token}`} style={{ color: '#15803d' }}>Log in</Link>
+            <Link href={`/login?next=/join/trip/${share_token}`} style={{ color: '#15803d' }}>Log in</Link>
           </p>
         )}
       </div>

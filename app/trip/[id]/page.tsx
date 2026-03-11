@@ -6,7 +6,6 @@ import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
 import ProtectedRoute from '@/components/ProtectedRoute'
-import InviteForm from '@/components/InviteForm'
 import EditTripForm from '@/components/EditTripForm'
 import Sidebar from '@/components/ui/Sidebar'
 import type { NavItem } from '@/components/ui/Sidebar'
@@ -26,10 +25,18 @@ type Trip = {
   share_token:  string | null
 }
 
-type Member = {
-  user_id: string
-  status:  string
-  users:   { full_name: string | null; email: string } | null
+type TripMember = {
+  id:           number
+  user_id:      string | null
+  display_name: string | null
+  email:        string | null
+  handicap:     number | null
+  role:         string
+  member_type:  string
+  invite_status: string
+  status:       string
+  invite_token: string | null
+  users:        { full_name: string | null; email: string | null; avatar_url: string | null } | null
 }
 
 type ChatMessage = {
@@ -291,15 +298,17 @@ const itinInputStyle: React.CSSProperties = {
 
 // ─── Nav ──────────────────────────────────────────────────────────────────────
 
-const NAV_ITEMS: NavItem[] = [
-  { id: 'concierge', icon: '✦',  label: 'Golf Concierge',  href: '' },
-  { id: 'itinerary', icon: '📅', label: 'Trip Itinerary',  href: '' },
-  { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
-  { id: 'teetimes',  icon: '🕐', label: 'Tee Times',       href: '' },
-  { id: 'hotels',    icon: '🏨', label: 'Accommodations',  href: '' },
-  { id: 'group',     icon: '👥', label: 'Group & Members', href: '' },
-  { id: 'budget',    icon: '💰', label: 'Budget Tracker',  href: '' },
-]
+function buildNavItems(memberCount: number): NavItem[] {
+  return [
+    { id: 'concierge', icon: '✦',  label: 'Golf Concierge',  href: '' },
+    { id: 'itinerary', icon: '📅', label: 'Trip Itinerary',  href: '' },
+    { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
+    { id: 'teetimes',  icon: '🕐', label: 'Tee Times',       href: '' },
+    { id: 'hotels',    icon: '🏨', label: 'Accommodations',  href: '' },
+    { id: 'group',     icon: '👥', label: 'Group & Members', href: '', badge: memberCount > 0 ? memberCount : undefined },
+    { id: 'budget',    icon: '💰', label: 'Budget Tracker',  href: '' },
+  ]
+}
 
 const SECTION_LABELS: Record<string, string> = {
   concierge: 'Golf Concierge',
@@ -314,15 +323,16 @@ const SECTION_LABELS: Record<string, string> = {
 // ─── Section: Golf Concierge ──────────────────────────────────────────────────
 
 interface TripConciergeSectionProps {
-  tripId:      string
-  tripName:    string
-  memberCount: number
-  startDate:   string | null
-  endDate:     string | null
+  tripId:        string
+  tripName:      string
+  memberCount:   number
+  handicapRange: string | null
+  startDate:     string | null
+  endDate:       string | null
 }
 
 function TripConciergeSection({
-  tripId, tripName, memberCount, startDate, endDate,
+  tripId, tripName, memberCount, handicapRange, startDate, endDate,
 }: TripConciergeSectionProps) {
   function makeWelcome(): ChatMessage {
     const ctxParts: string[] = []
@@ -381,9 +391,10 @@ function TripConciergeSection({
   // Build trip context object for every API call
   function buildTripContext(): TripContext {
     const ctx: TripContext = { tripName }
-    if (memberCount > 0)        ctx.memberCount  = memberCount
-    if (startDate)              ctx.startDate    = startDate
-    if (endDate)                ctx.endDate      = endDate
+    if (memberCount > 0)        ctx.memberCount   = memberCount
+    if (handicapRange)          ctx.handicapRange = handicapRange
+    if (startDate)              ctx.startDate     = startDate
+    if (endDate)                ctx.endDate       = endDate
     if (addedCourses.length > 0) ctx.addedCourses = addedCourses
     return ctx
   }
@@ -753,92 +764,278 @@ function TripConciergeSection({
 
 // ─── Section: Group & Members ─────────────────────────────────────────────────
 
-function GroupSection({
-  trip, members, isOrganizer, onEdit, onCopyLink, onRemoveMember, onLeaveTrip, copied, currentUserId,
-}: {
-  trip:           Trip
-  members:        Member[]
-  isOrganizer:    boolean
-  onEdit:         () => void
-  onCopyLink:     () => void
-  onRemoveMember: (id: string) => void
-  onLeaveTrip:    () => void
-  copied:         boolean
-  currentUserId:  string | undefined
-}) {
-  return (
-    <div style={{ maxWidth: '620px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+function getMemberName(m: TripMember): string {
+  return m.users?.full_name ?? m.display_name ?? m.users?.email ?? m.email ?? 'Unknown'
+}
 
-      {/* Trip card */}
-      <div style={{ background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--cream-dark)', overflow: 'hidden' }}>
-        <div style={{ height: '6px', background: 'linear-gradient(90deg, var(--green-deep), var(--green-light))' }} />
-        <div style={{ padding: '28px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '20px' }}>
-            <div>
-              <div style={{ fontSize: '9px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--green-muted)', marginBottom: '6px', fontWeight: 600, fontFamily: 'var(--font-sans)' }}>Golf Trip</div>
-              <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '24px', color: 'var(--green-deep)', fontWeight: 600 }}>{trip.name}</h2>
-              <p style={{ fontSize: '13px', color: 'var(--text-light)', marginTop: '4px', fontWeight: 300, fontFamily: 'var(--font-sans)' }}>📍 {trip.destination ?? 'Destination TBD'}</p>
-            </div>
-            {isOrganizer && (
-              <button onClick={onEdit} style={{ background: 'transparent', border: '1px solid var(--cream-dark)', borderRadius: 'var(--radius-sm)', padding: '7px 14px', fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--green-deep)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>
-                Edit
-              </button>
-            )}
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', background: 'var(--cream)', borderRadius: 'var(--radius-md)', padding: '16px' }}>
-            {[['Start', trip.start_date], ['End', trip.end_date]].map(([label, date]) => (
-              <div key={label}>
-                <div style={{ fontSize: '10px', color: 'var(--text-light)', marginBottom: '4px', fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'var(--font-sans)' }}>{label}</div>
-                <div style={{ fontSize: '14px', color: 'var(--green-deep)', fontWeight: 500, fontFamily: 'var(--font-sans)' }}>{formatDate(date as string | null)}</div>
-              </div>
-            ))}
-          </div>
+function getMemberStatus(m: TripMember): { text: string; bg: string; color: string } {
+  if (m.member_type === 'registered' || m.invite_status === 'accepted') {
+    return { text: '✓ Joined', bg: 'rgba(74,124,74,0.12)', color: '#4a7c4a' }
+  }
+  if (m.invite_status === 'pending') {
+    return { text: '✉ Invited', bg: 'rgba(196,168,79,0.15)', color: '#b59a3c' }
+  }
+  return { text: 'Not invited', bg: 'var(--cream)', color: 'var(--text-light)' }
+}
+
+function GroupSection({
+  tripId, trip, members, isOrganizer, onEdit, onCopyLink, onLeaveTrip, onMembersChange, currentUserId,
+}: {
+  tripId:          string
+  trip:            Trip
+  members:         TripMember[]
+  isOrganizer:     boolean
+  onEdit:          () => void
+  onCopyLink:      () => void
+  onLeaveTrip:     () => void
+  onMembersChange: (members: TripMember[]) => void
+  currentUserId:   string | undefined
+}) {
+  const [addForm,      setAddForm]      = useState({ display_name: '', handicap: '', email: '' })
+  const [addSaving,    setAddSaving]    = useState(false)
+  const [addError,     setAddError]     = useState('')
+  const [editingHcpId, setEditingHcpId] = useState<number | null>(null)
+  const [hcpDraft,     setHcpDraft]     = useState('')
+  const [menuOpenId,   setMenuOpenId]   = useState<number | null>(null)
+  const [invitingId,   setInvitingId]   = useState<number | null>(null)
+  const [copied,       setCopied]       = useState(false)
+
+  const nonSelfCount = members.filter((m) => !(m.role === 'organizer' && m.user_id === currentUserId)).length
+  const isEmpty = nonSelfCount === 0
+
+  async function handleAdd() {
+    if (!addForm.display_name.trim()) return
+    setAddSaving(true); setAddError('')
+    const res = await fetch(`/api/trips/${tripId}/members`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        display_name: addForm.display_name.trim(),
+        handicap: addForm.handicap ? Number(addForm.handicap) : null,
+        email: addForm.email.trim() || null,
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      setAddError(data.error ?? 'Error adding member')
+    } else {
+      onMembersChange([...members, { ...data, users: null }])
+      setAddForm({ display_name: '', handicap: '', email: '' })
+    }
+    setAddSaving(false)
+  }
+
+  async function handleRemove(memberId: number) {
+    setMenuOpenId(null)
+    await fetch(`/api/trips/${tripId}/members/${memberId}`, { method: 'DELETE' })
+    onMembersChange(members.filter((m) => m.id !== memberId))
+  }
+
+  async function saveHcp(memberId: number) {
+    const hcp = hcpDraft.trim() === '' ? null : Number(hcpDraft)
+    setEditingHcpId(null)
+    await fetch(`/api/trips/${tripId}/members/${memberId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handicap: hcp }),
+    })
+    onMembersChange(members.map((m) => m.id === memberId ? { ...m, handicap: hcp } : m))
+  }
+
+  async function sendInvite(m: TripMember) {
+    setInvitingId(m.id); setMenuOpenId(null)
+    await fetch(`/api/trips/${tripId}/members/${m.id}/send-invite`, { method: 'POST' })
+    onMembersChange(members.map((mem) => mem.id === m.id ? { ...mem, invite_status: 'pending' } : mem))
+    setInvitingId(null)
+  }
+
+  function copyLink() {
+    onCopyLink()
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const inputStyle: React.CSSProperties = {
+    padding: '10px 12px', borderRadius: 'var(--radius-md)',
+    border: '1px solid var(--cream-dark)', background: 'var(--cream)',
+    fontSize: '13px', color: 'var(--text-dark)', fontFamily: 'var(--font-sans)', outline: 'none',
+  }
+
+  return (
+    <div style={{ maxWidth: '640px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+        <div>
+          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '28px', color: 'var(--green-deep)', fontWeight: 700, margin: '0 0 4px' }}>
+            The Crew
+          </h2>
+          <p style={{ fontSize: '13px', color: 'var(--text-light)', fontWeight: 300, margin: 0, fontFamily: 'var(--font-sans)' }}>
+            {members.length} golfer{members.length !== 1 ? 's' : ''}
+          </p>
         </div>
+        {isOrganizer && (
+          <button onClick={onEdit} style={{ background: 'transparent', border: '1px solid var(--cream-dark)', borderRadius: 'var(--radius-sm)', padding: '7px 14px', fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--green-deep)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>
+            Edit Trip
+          </button>
+        )}
       </div>
 
-      {/* Members */}
+      {/* Member cards */}
       {members.length > 0 && (
-        <div style={{ background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--cream-dark)', padding: '24px 28px' }}>
-          <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', color: 'var(--green-deep)', marginBottom: '16px', paddingBottom: '10px', borderBottom: '1px solid var(--cream-dark)' }}>Members</div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {members.map((m, i) => {
-              const name = m.users?.full_name ?? m.users?.email ?? 'Unknown'
-              return (
-                <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 0', borderBottom: i < members.length - 1 ? '1px solid var(--cream-dark)' : 'none' }}>
-                  <div style={{ width: '40px', height: '40px', borderRadius: '50%', background: AVATAR_COLORS[i % AVATAR_COLORS.length] + '22', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 700, color: 'var(--green-deep)', flexShrink: 0, fontFamily: 'var(--font-sans)' }}>
-                    {getInitials(name)}
+        <div style={{ background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--cream-dark)', overflow: 'hidden' }}>
+          {members.map((m, i) => {
+            const name     = getMemberName(m)
+            const isLast   = i === members.length - 1
+            const isSelf   = m.user_id === currentUserId
+            const status   = getMemberStatus(m)
+            const avatarBg = m.role === 'organizer' ? 'rgba(196,168,79,0.18)' : m.member_type === 'ghost' ? '#f0f0f0' : 'rgba(74,124,74,0.14)'
+            const avatarColor = m.role === 'organizer' ? '#b59a3c' : m.member_type === 'ghost' ? '#9a9a9a' : '#4a7c4a'
+            const isEditingHcp = editingHcpId === m.id
+
+            return (
+              <div key={m.id} style={{ padding: '14px 20px', borderBottom: isLast ? 'none' : '1px solid var(--cream-dark)', display: 'flex', alignItems: 'center', gap: '14px', position: 'relative' }}>
+                {/* Avatar */}
+                <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: avatarBg, color: avatarColor, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 700, flexShrink: 0, fontFamily: 'var(--font-sans)', border: m.role === 'organizer' ? '2px solid rgba(196,168,79,0.4)' : 'none' }}>
+                  {getInitials(name)}
+                </div>
+
+                {/* Info */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--green-deep)', fontFamily: 'var(--font-sans)' }}>{name}</span>
+                    {m.role === 'organizer' && (
+                      <span style={{ fontSize: '9px', padding: '2px 7px', borderRadius: '20px', background: 'rgba(196,168,79,0.2)', color: '#b59a3c', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', fontFamily: 'var(--font-sans)' }}>
+                        Organizer
+                      </span>
+                    )}
                   </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--green-deep)', fontFamily: 'var(--font-sans)' }}>{name}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 300, fontFamily: 'var(--font-sans)' }}>{m.users?.email}</div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{ fontSize: '10px', padding: '4px 10px', borderRadius: '20px', fontWeight: 600, letterSpacing: '0.05em', fontFamily: 'var(--font-sans)', background: m.status === 'confirmed' ? 'rgba(74,124,74,0.15)' : 'rgba(196,168,79,0.15)', color: m.status === 'confirmed' ? 'var(--green-light)' : 'var(--gold)' }}>
-                      {m.status === 'confirmed' ? '✓ Confirmed' : '⏳ Pending'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '10px', padding: '2px 8px', borderRadius: '20px', fontWeight: 600, letterSpacing: '0.04em', fontFamily: 'var(--font-sans)', background: status.bg, color: status.color }}>
+                      {status.text}
                     </span>
-                    {isOrganizer && m.user_id !== currentUserId && (
-                      <button onClick={() => onRemoveMember(m.user_id)} style={{ background: 'transparent', border: 'none', fontSize: '11px', color: '#c0392b', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>Remove</button>
+                    {/* HCP inline edit */}
+                    {isEditingHcp ? (
+                      <input
+                        type="number" value={hcpDraft} autoFocus
+                        onChange={(e) => setHcpDraft(e.target.value)}
+                        onBlur={() => saveHcp(m.id)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') saveHcp(m.id); if (e.key === 'Escape') setEditingHcpId(null) }}
+                        style={{ width: '64px', padding: '2px 6px', fontSize: '11px', borderRadius: '4px', border: '1px solid var(--cream-dark)', fontFamily: 'var(--font-sans)', outline: 'none' }}
+                      />
+                    ) : (
+                      <button
+                        onClick={() => { setEditingHcpId(m.id); setHcpDraft(m.handicap != null ? String(m.handicap) : '') }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '11px', color: 'var(--text-light)', fontFamily: 'var(--font-sans)', padding: 0 }}
+                      >
+                        HCP {m.handicap != null ? m.handicap : '—'}
+                      </button>
                     )}
                   </div>
                 </div>
-              )
-            })}
+
+                {/* Three-dot menu — organizer only, not for self */}
+                {isOrganizer && !isSelf && (
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <button
+                      onClick={() => setMenuOpenId(menuOpenId === m.id ? null : m.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '20px', color: 'var(--text-light)', lineHeight: 1, padding: '4px 8px' }}
+                    >
+                      ···
+                    </button>
+                    {menuOpenId === m.id && (
+                      <>
+                        <div onClick={() => setMenuOpenId(null)} style={{ position: 'fixed', inset: 0, zIndex: 50 }} />
+                        <div style={{ position: 'absolute', right: 0, top: '100%', background: '#fff', borderRadius: '10px', boxShadow: '0 4px 24px rgba(0,0,0,0.14)', border: '1px solid var(--cream-dark)', zIndex: 51, minWidth: '180px', overflow: 'hidden' }}>
+                          {m.email && (
+                            <button
+                              onClick={() => sendInvite(m)}
+                              disabled={invitingId === m.id}
+                              style={{ display: 'block', width: '100%', textAlign: 'left', padding: '11px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '13px', color: 'var(--green-deep)', fontFamily: 'var(--font-sans)' }}
+                            >
+                              {invitingId === m.id ? 'Sending…' : '✉ Send invite email'}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleRemove(m.id)}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', padding: '11px 16px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '13px', color: '#c0392b', fontFamily: 'var(--font-sans)' }}
+                          >
+                            Remove from trip
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Empty state */}
+      {isEmpty && (
+        <div style={{ background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '2px dashed var(--cream-dark)', padding: '36px', textAlign: 'center' }}>
+          <div style={{ fontSize: '36px', marginBottom: '12px' }}>👥</div>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', color: 'var(--green-deep)', marginBottom: '6px' }}>Add your crew</div>
+          <p style={{ fontSize: '13px', color: 'var(--text-light)', fontWeight: 300, margin: '0 0 20px', fontFamily: 'var(--font-sans)' }}>
+            Invite golfers below — add them manually or share a link.
+          </p>
+          <button
+            onClick={copyLink}
+            style={{ padding: '10px 20px', borderRadius: 'var(--radius-md)', border: '1px solid var(--cream-dark)', background: copied ? 'rgba(74,124,74,0.1)' : 'var(--cream)', color: copied ? 'var(--green-light)' : 'var(--text-mid)', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-sans)', transition: 'all 0.2s' }}
+          >
+            {copied ? '✓ Invite link copied!' : '🔗 Copy invite link'}
+          </button>
+        </div>
+      )}
+
+      {/* Add member form — organizer only */}
+      {isOrganizer && (
+        <div style={{ background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--cream-dark)', padding: '20px 24px' }}>
+          <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-light)', marginBottom: '14px', fontFamily: 'var(--font-sans)' }}>
+            Add Member
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 1fr', gap: '10px', marginBottom: '10px' }}>
+            <input
+              type="text" placeholder="Name *" value={addForm.display_name}
+              onChange={(e) => setAddForm((f) => ({ ...f, display_name: e.target.value }))}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleAdd() }}
+              style={inputStyle}
+            />
+            <input
+              type="number" placeholder="HCP" value={addForm.handicap}
+              onChange={(e) => setAddForm((f) => ({ ...f, handicap: e.target.value }))}
+              style={inputStyle}
+            />
+            <input
+              type="email" placeholder="Email (optional)" value={addForm.email}
+              onChange={(e) => setAddForm((f) => ({ ...f, email: e.target.value }))}
+              style={inputStyle}
+            />
+          </div>
+          {addError && (
+            <p style={{ fontSize: '12px', color: '#c0392b', margin: '0 0 8px', fontFamily: 'var(--font-sans)' }}>{addError}</p>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button
+              onClick={handleAdd}
+              disabled={addSaving || !addForm.display_name.trim()}
+              style={{ padding: '10px 20px', borderRadius: 'var(--radius-md)', border: 'none', background: addSaving || !addForm.display_name.trim() ? 'var(--cream-dark)' : 'var(--green-deep)', color: addSaving || !addForm.display_name.trim() ? 'var(--text-light)' : 'var(--gold-light)', fontSize: '13px', fontWeight: 600, cursor: addSaving || !addForm.display_name.trim() ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-sans)', transition: 'all 0.2s' }}
+            >
+              {addSaving ? 'Adding…' : '+ Add Member'}
+            </button>
+            {!isEmpty && (
+              <button
+                onClick={copyLink}
+                style={{ background: 'none', border: 'none', fontSize: '13px', color: copied ? 'var(--green-light)' : 'var(--text-light)', cursor: 'pointer', fontFamily: 'var(--font-sans)', padding: '10px 0' }}
+              >
+                {copied ? '✓ Copied!' : '🔗 Copy invite link'}
+              </button>
+            )}
           </div>
         </div>
       )}
 
-      {/* Invite */}
-      <div style={{ background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--cream-dark)', padding: '24px 28px' }}>
-        <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', color: 'var(--green-deep)', marginBottom: '16px', paddingBottom: '10px', borderBottom: '1px solid var(--cream-dark)' }}>Invite the Crew</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <button onClick={onCopyLink} style={{ width: '100%', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--cream-dark)', background: copied ? 'rgba(74,124,74,0.1)' : 'var(--white)', color: copied ? 'var(--green-light)' : 'var(--text-mid)', fontSize: '13px', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s', fontFamily: 'var(--font-sans)' }}>
-            {copied ? '✓ Invite link copied!' : 'Copy invite link'}
-          </button>
-          <InviteForm tripId={trip.id} />
-        </div>
-      </div>
-
-      {/* Leave */}
+      {/* Leave trip */}
       {!isOrganizer && (
         <button onClick={onLeaveTrip} style={{ width: '100%', padding: '12px', borderRadius: 'var(--radius-md)', border: '1px solid rgba(192,57,43,0.3)', background: 'transparent', color: '#c0392b', fontSize: '13px', fontWeight: 500, cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>
           Leave trip
@@ -1809,7 +2006,7 @@ export default function TripPage() {
   const router      = useRouter()
 
   const [trip,      setTrip]      = useState<Trip | null>(null)
-  const [members,   setMembers]   = useState<Member[]>([])
+  const [members,   setMembers]   = useState<TripMember[]>([])
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState('')
   const [copied,    setCopied]    = useState(false)
@@ -1824,15 +2021,31 @@ export default function TripPage() {
       if (error) { setError('Trip not found.'); setLoading(false); return }
       setTrip(data)
 
-      const { data: memberRows } = await supabase
-        .from('trip_members').select('user_id, status').eq('trip_id', id)
-      if (memberRows && memberRows.length > 0) {
-        const userIds = memberRows.map((m) => m.user_id)
-        const { data: userData } = await supabase
-          .from('users').select('id, full_name, email').in('id', userIds)
-        setMembers(memberRows.map((m) => ({
-          ...m, users: userData?.find((u) => u.id === m.user_id) ?? null,
-        })))
+      // Try new columns (post-migration); fall back to basic select if columns don't exist yet
+      const { data: newRows, error: newColErr } = await supabase
+        .from('trip_members')
+        .select('id, user_id, display_name, email, handicap, role, member_type, invite_status, status, invite_token')
+        .eq('trip_id', id)
+        .order('created_at', { ascending: true })
+
+      const rawRows = newColErr
+        ? ((await supabase.from('trip_members').select('id, user_id, status').eq('trip_id', id)).data ?? []).map((m: Record<string, unknown>) => ({
+            ...m, display_name: null, email: null, handicap: null,
+            role: 'member', member_type: 'registered', invite_status: 'accepted', invite_token: null,
+          }))
+        : (newRows ?? [])
+
+      if (rawRows.length > 0) {
+        const userIds = rawRows.map((m: Record<string, unknown>) => m.user_id).filter(Boolean) as string[]
+        const userMap: Record<string, { full_name: string | null; email: string | null; avatar_url: string | null }> = {}
+        if (userIds.length > 0) {
+          const { data: userData } = await supabase
+            .from('users').select('id, full_name, email, avatar_url').in('id', userIds)
+          userData?.forEach((u) => { userMap[u.id] = u })
+        }
+        setMembers(rawRows.map((m: Record<string, unknown>) => ({
+          ...m, users: m.user_id ? (userMap[m.user_id as string] ?? null) : null,
+        })) as TripMember[])
       }
       setLoading(false)
     }
@@ -1846,9 +2059,9 @@ export default function TripPage() {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  async function handleRemoveMember(userId: string) {
-    await supabase.from('trip_members').delete().eq('trip_id', id).eq('user_id', userId)
-    setMembers((prev) => prev.filter((m) => m.user_id !== userId))
+  async function handleRemoveMember(memberId: number) {
+    await supabase.from('trip_members').delete().eq('id', memberId)
+    setMembers((prev) => prev.filter((m) => m.id !== memberId))
   }
 
   async function handleLeaveTrip() {
@@ -1858,13 +2071,19 @@ export default function TripPage() {
   }
 
   const sidebarMembers = members.map((m, i) => ({
-    initials: getInitials(m.users?.full_name ?? m.users?.email ?? '?'),
-    color:    AVATAR_COLORS[i % AVATAR_COLORS.length],
+    initials: getInitials(m.users?.full_name ?? m.display_name ?? m.users?.email ?? m.email ?? '?'),
+    color:    m.role === 'organizer' ? '#c4a84f' : AVATAR_COLORS[i % AVATAR_COLORS.length],
   }))
 
   const isConcierge = activeNav === 'concierge'
   const isItinerary = activeNav === 'itinerary'
   const isFullHeight = isConcierge || isItinerary
+
+  // Compute handicap range string for concierge context
+  const hcps = members.map((m) => m.handicap).filter((h): h is number => h != null)
+  const handicapRange = hcps.length > 0
+    ? hcps.length === 1 ? `${hcps[0]}` : `${Math.min(...hcps)}–${Math.max(...hcps)}`
+    : null
 
   return (
     <ProtectedRoute>
@@ -1873,7 +2092,7 @@ export default function TripPage() {
         {/* Sidebar */}
         {trip && (
           <Sidebar
-            navItems={NAV_ITEMS}
+            navItems={buildNavItems(members.length)}
             activeId={activeNav}
             onItemClick={(navId) => {
                 if (navId === 'report') { router.push(`/trip/${id}/report`); return }
@@ -1938,6 +2157,7 @@ export default function TripPage() {
                   tripId={trip.id}
                   tripName={trip.name}
                   memberCount={members.length}
+                  handicapRange={handicapRange}
                   startDate={trip.start_date}
                   endDate={trip.end_date}
                 />
@@ -1954,14 +2174,14 @@ export default function TripPage() {
                 <div style={{ padding: '36px 48px' }}>
                   {activeNav === 'group' ? (
                     <GroupSection
+                      tripId={trip.id}
                       trip={trip}
                       members={members}
                       isOrganizer={isOrganizer}
                       onEdit={() => setEditing(true)}
                       onCopyLink={copyInviteLink}
-                      onRemoveMember={handleRemoveMember}
                       onLeaveTrip={handleLeaveTrip}
-                      copied={copied}
+                      onMembersChange={setMembers}
                       currentUserId={session?.user.id}
                     />
                   ) : (

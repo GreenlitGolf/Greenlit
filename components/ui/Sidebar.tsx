@@ -4,10 +4,11 @@ import React from 'react'
 import Link from 'next/link'
 
 export interface NavItem {
-  id:    string
-  icon:  string
-  label: string
-  href:  string
+  id:     string
+  icon:   string
+  label:  string
+  href:   string
+  badge?: number   // optional count badge shown on the right
 }
 
 interface MemberAvatar {
@@ -192,7 +193,18 @@ export default function Sidebar({
               <span style={{ fontSize: '16px', width: '20px', textAlign: 'center' }}>
                 {item.icon}
               </span>
-              {item.label}
+              <span style={{ flex: 1 }}>{item.label}</span>
+              {item.badge != null && item.badge > 0 && (
+                <span style={{
+                  fontSize: '10px', fontWeight: 700, lineHeight: 1,
+                  padding: '2px 7px', borderRadius: '20px',
+                  background: isActive ? 'rgba(196,168,79,0.3)' : 'rgba(255,255,255,0.12)',
+                  color: isActive ? 'var(--gold-light)' : 'rgba(245,240,232,0.6)',
+                  fontFamily: 'var(--font-sans)',
+                }}>
+                  {item.badge}
+                </span>
+              )}
             </>
           )
 
