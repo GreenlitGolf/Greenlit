@@ -4,10 +4,10 @@ import { createAdminSupabaseClient } from '@/lib/supabase-server'
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
-type Params = { params: { id: string; memberId: string } }
+type Params = { params: Promise<{ id: string; memberId: string }> }
 
 export async function POST(req: NextRequest, { params }: Params) {
-  const { id: tripId, memberId } = params
+  const { id: tripId, memberId } = await params
   const db = createAdminSupabaseClient()
 
   // Fetch member + trip in parallel
@@ -20,7 +20,7 @@ export async function POST(req: NextRequest, { params }: Params) {
       .single(),
     db
       .from('trips')
-      .select('name, destination, start_date, end_date, user_id, profiles(display_name)')
+      .select('name, destination, start_date, end_date, user_id')
       .eq('id', tripId)
       .single(),
   ])
@@ -39,9 +39,16 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: 'Member has no email address' }, { status: 400 })
   }
 
-  const baseUrl    = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
-  const inviteUrl  = `${baseUrl}/join/${member.invite_token}`
-  const organizer  = (trip.profiles as { display_name?: string } | null)?.display_name || 'Your trip organizer'
+  // Fetch organizer display name
+  const { data: organizerData } = await db
+    .from('users')
+    .select('full_name')
+    .eq('id', trip.user_id)
+    .single()
+
+  const baseUrl   = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+  const inviteUrl = `${baseUrl}/join/${member.invite_token}`
+  const organizer = organizerData?.full_name || 'Your trip organizer'
 
   // Format date range
   let dateStr = ''

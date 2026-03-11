@@ -4,9 +4,9 @@ import { createAdminSupabaseClient } from '@/lib/supabase-server'
 // POST /api/trips/[id]/members — add a ghost member
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: tripId } = params
+  const { id: tripId } = await params
   const { display_name, email, handicap } = await req.json()
 
   if (!display_name?.trim()) {
@@ -41,14 +41,14 @@ export async function POST(
 // GET /api/trips/[id]/members — list all members
 export async function GET(
   _req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
-  const { id: tripId } = params
+  const { id: tripId } = await params
   const db = createAdminSupabaseClient()
 
   const { data, error } = await db
     .from('trip_members')
-    .select('id, user_id, display_name, email, handicap, role, member_type, invite_status, status, created_at, profiles(display_name, avatar_url)')
+    .select('id, user_id, display_name, email, handicap, role, member_type, invite_status, status, created_at')
     .eq('trip_id', tripId)
     .order('created_at', { ascending: true })
 

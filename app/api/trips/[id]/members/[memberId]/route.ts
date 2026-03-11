@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminSupabaseClient } from '@/lib/supabase-server'
 
-type Params = { params: { id: string; memberId: string } }
+type Params = { params: Promise<{ id: string; memberId: string }> }
 
 // PATCH /api/trips/[id]/members/[memberId] — update display_name, handicap, role
 export async function PATCH(req: NextRequest, { params }: Params) {
-  const { id: tripId, memberId } = params
+  const { id: tripId, memberId } = await params
   const body = await req.json()
 
   const allowed = ['display_name', 'handicap', 'email', 'role', 'invite_status']
@@ -37,7 +37,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
 // DELETE /api/trips/[id]/members/[memberId]
 export async function DELETE(_req: NextRequest, { params }: Params) {
-  const { id: tripId, memberId } = params
+  const { id: tripId, memberId } = await params
   const db = createAdminSupabaseClient()
 
   const { error } = await db
