@@ -1,8 +1,9 @@
 /**
  * POST /api/admin/reset-queue
  * Resets one or more course_queue entries back to pending so they can be re-enriched.
- * Accepts { ids: string[] } to reset specific rows, or { missingPhotos: true }
- * to reset all complete rows whose corresponding course has no google_place_id.
+ * Accepts { ids: string[] } to reset specific rows, { missingPhotos: true }
+ * to reset all complete rows whose corresponding course has no google_place_id,
+ * or { setPriority: { id, priority } } to toggle priority on a queue item.
  * Auth: CRON_SECRET header (re-uses existing admin secret).
  */
 
@@ -62,5 +63,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reset: count ?? toReset.length })
   }
 
-  return NextResponse.json({ error: 'Provide ids[] or missingPhotos:true' }, { status: 400 })
+  // ── Mode 3: set priority on a specific queue item ────────────────────────
+  if (body.setPriority && typeof body.setPriority.id === 'string') {
+    const { id, priority } = body.setPriority
+    const { error: prioErr } = await db
+      .from('course_queue')
+      .update({ priority: !!priority })
+      .eq('id', id)
+
+    if (prioErr) return NextResponse.json({ error: prioErr.message }, { status: 500 })
+    return NextResponse.json({ updated: true, id, priority: !!priority })
+  }
+
+  return NextResponse.json({ error: 'Provide ids[], missingPhotos:true, or setPriority:{id,priority}' }, { status: 400 })
 }

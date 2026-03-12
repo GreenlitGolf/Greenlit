@@ -18,6 +18,7 @@ type QueueRecord = {
   notes        : string | null
   created_at   : string
   processed_at : string | null
+  priority     : boolean
 }
 
 type Stats = Record<QueueStatus | 'total', number>
@@ -80,13 +81,30 @@ export default function AdminCoursesPage() {
   const { session } = useAuth()
   const router      = useRouter()
 
-  const [records,   setRecords]   = useState<QueueRecord[]>([])
-  const [stats,     setStats]     = useState<Stats>({ pending: 0, processing: 0, complete: 0, failed: 0, private: 0, total: 0 })
-  const [filter,    setFilter]    = useState<FilterTab>('all')
-  const [loading,   setLoading]   = useState(true)
-  const [running,    setRunning]    = useState(false)
-  const [run10,      setRun10]      = useState<{ active: boolean; done: number; countdown: number }>({ active: false, done: 0, countdown: 0 })
-  const [lastResult, setLastResult] = useState<RunResult | null>(null)
+  const [records,       setRecords]       = useState<QueueRecord[]>([])
+  const [stats,         setStats]         = useState<Stats>({ pending: 0, processing: 0, complete: 0, failed: 0, private: 0, total: 0 })
+  const [filter,        setFilter]        = useState<FilterTab>('all')
+  const [loading,       setLoading]       = useState(true)
+  const [running,       setRunning]       = useState(false)
+  const [run10,         setRun10]         = useState<{ active: boolean; done: number; countdown: number }>({ active: false, done: 0, countdown: 0 })
+  const [lastResult,    setLastResult]    = useState<RunResult | null>(null)
+  const [reenriching,   setReenriching]   = useState<Set<string>>(new Set())
+  const [resetLoading,  setResetLoading]  = useState(false)
+  const [deepResearch,  setDeepResearch]  = useState(false)
+
+  // Initialize deep research toggle from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('greenlit-deep-research')
+      if (stored === 'true') setDeepResearch(true)
+    } catch { /* SSR or localStorage unavailable */ }
+  }, [])
+
+  function toggleDeepResearch() {
+    const next = !deepResearch
+    setDeepResearch(next)
+    try { localStorage.setItem('greenlit-deep-research', String(next)) } catch {}
+  }
 
   // ── Guard: only admin ───────────────────────────────────────
   useEffect(() => {
@@ -101,13 +119,24 @@ export default function AdminCoursesPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
 
-    const query = supabase
+    let query = supabase
       .from('course_queue')
-      .select('id, name, location, country, status, notes, created_at, processed_at')
-      .order('processed_at', { ascending: false, nullsFirst: false })
-      .limit(50)
+      .select('id, name, location, country, status, notes, created_at, processed_at, priority')
 
-    if (filter !== 'all') query.eq('status', filter)
+    if (filter !== 'all') {
+      query = query.eq('status', filter)
+    }
+
+    // Pending sorts by priority first, then created_at
+    if (filter === 'pending') {
+      query = query
+        .order('priority', { ascending: false })
+        .order('created_at', { ascending: true })
+    } else {
+      query = query.order('processed_at', { ascending: false, nullsFirst: false })
+    }
+
+    query = query.limit(50)
 
     const [{ data: rows }, { data: allRows }] = await Promise.all([
       query,
@@ -129,11 +158,60 @@ export default function AdminCoursesPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  // ── Reset helpers ────────────────────────────────────────────
+  async function resetQueue(body: object): Promise<number> {
+    const res = await fetch('/api/admin/reset-queue', {
+      method : 'POST',
+      headers: {
+        'Content-Type' : 'application/json',
+        Authorization  : `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`,
+      },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json()
+    return data.reset ?? 0
+  }
+
+  async function handleReenrich(record: QueueRecord) {
+    setReenriching((prev) => new Set(prev).add(record.id))
+    await resetQueue({ ids: [record.id] })
+    await loadData()
+    setReenriching((prev) => { const s = new Set(prev); s.delete(record.id); return s })
+  }
+
+  async function handleResetMissingPhotos() {
+    setResetLoading(true)
+    const count = await resetQueue({ missingPhotos: true })
+    setLastResult({ status: 'info', message: `Reset ${count} course${count === 1 ? '' : 's'} with missing photos → pending` } as RunResult)
+    await loadData()
+    setResetLoading(false)
+  }
+
+  // ── Priority toggle ──────────────────────────────────────────
+  async function handleTogglePriority(record: QueueRecord) {
+    const newPriority = !record.priority
+    // Optimistic update
+    setRecords((prev) => prev.map((r) => r.id === record.id ? { ...r, priority: newPriority } : r))
+
+    await fetch('/api/admin/reset-queue', {
+      method : 'POST',
+      headers: {
+        'Content-Type' : 'application/json',
+        Authorization  : `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`,
+      },
+      body: JSON.stringify({ setPriority: { id: record.id, priority: newPriority } }),
+    })
+  }
+
   // ── Run one enrichment ──────────────────────────────────────
   async function runOne(): Promise<RunResult | null> {
     const res = await fetch('/api/cron/enrich-courses', {
       method : 'POST',
-      headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}` },
+      headers: {
+        'Content-Type' : 'application/json',
+        Authorization  : `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`,
+      },
+      body: JSON.stringify({ mode: deepResearch ? 'deep' : 'standard' }),
     })
     return res.json()
   }
@@ -289,6 +367,26 @@ export default function AdminCoursesPage() {
           </button>
 
           <button
+            onClick={handleResetMissingPhotos}
+            disabled={running || run10.active || resetLoading}
+            style={{
+              padding      : '10px 20px',
+              borderRadius : 'var(--radius-sm)',
+              background   : 'transparent',
+              color        : resetLoading ? 'var(--text-light)' : 'var(--green-deep)',
+              border       : '1px solid var(--green-deep)',
+              fontSize     : '13px',
+              fontWeight   : 600,
+              cursor       : (running || run10.active || resetLoading) ? 'not-allowed' : 'pointer',
+              letterSpacing: '0.04em',
+              fontFamily   : 'var(--font-sans)',
+              opacity      : (running || run10.active) ? 0.5 : 1,
+            }}
+          >
+            {resetLoading ? '⏳ Resetting…' : '🖼 Reset Missing Photos'}
+          </button>
+
+          <button
             onClick={loadData}
             disabled={loading}
             style={{
@@ -304,6 +402,56 @@ export default function AdminCoursesPage() {
           >
             ↺ Refresh
           </button>
+        </div>
+
+        {/* Deep Research toggle */}
+        <div style={{
+          display      : 'flex',
+          alignItems   : 'center',
+          gap          : '12px',
+          marginBottom : '20px',
+          padding      : '12px 16px',
+          background   : deepResearch ? 'rgba(45,90,60,0.06)' : 'rgba(139,120,90,0.06)',
+          borderRadius : 'var(--radius-sm)',
+          border       : `1px solid ${deepResearch ? 'rgba(45,90,60,0.15)' : 'var(--cream-dark)'}`,
+          transition   : 'all 0.2s',
+        }}>
+          <button
+            onClick={toggleDeepResearch}
+            style={{
+              width        : '40px',
+              height       : '22px',
+              borderRadius : '11px',
+              border       : 'none',
+              cursor       : 'pointer',
+              background   : deepResearch ? 'var(--green-deep)' : 'var(--cream-dark)',
+              position     : 'relative',
+              transition   : 'background 0.2s',
+              flexShrink   : 0,
+            }}
+          >
+            <span style={{
+              position     : 'absolute',
+              top           : '2px',
+              left          : deepResearch ? '20px' : '2px',
+              width         : '18px',
+              height        : '18px',
+              borderRadius  : '50%',
+              background    : deepResearch ? 'var(--gold-light)' : 'var(--white)',
+              transition    : 'left 0.2s',
+              boxShadow     : '0 1px 3px rgba(0,0,0,0.2)',
+            }} />
+          </button>
+          <div>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--green-deep)' }}>
+              Deep Research {deepResearch ? 'ON' : 'OFF'}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 300, marginTop: '1px' }}>
+              {deepResearch
+                ? 'Two-phase: source discovery → fetch URLs → deep synthesis (~40-60s per course)'
+                : 'Single-pass web search (~15-25s per course)'}
+            </div>
+          </div>
         </div>
 
         {/* Last result inline */}
@@ -386,17 +534,18 @@ export default function AdminCoursesPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: 'var(--cream)', borderBottom: '1px solid var(--cream-dark)' }}>
-                  {['Course', 'Location', 'Country', 'Status', 'Processed', 'Notes'].map((h) => (
+                  {['', 'Course', 'Location', 'Country', 'Status', 'Processed', 'Notes', ''].map((h, i) => (
                     <th
-                      key={h}
+                      key={`${h}-${i}`}
                       style={{
-                        padding      : '10px 16px',
+                        padding      : h === '' && i === 0 ? '10px 8px 10px 16px' : '10px 16px',
                         textAlign    : 'left',
                         fontSize     : '10px',
                         letterSpacing: '0.1em',
                         textTransform: 'uppercase',
                         color        : 'var(--text-light)',
                         fontWeight   : 600,
+                        width        : h === '' && i === 0 ? '32px' : undefined,
                       }}
                     >
                       {h}
@@ -413,6 +562,29 @@ export default function AdminCoursesPage() {
                       background  : 'var(--white)',
                     }}
                   >
+                    {/* Priority star */}
+                    <td style={{ padding: '10px 8px 10px 16px', width: '32px' }}>
+                      {r.status === 'pending' ? (
+                        <button
+                          onClick={() => handleTogglePriority(r)}
+                          title={r.priority ? 'Remove priority' : 'Mark as priority'}
+                          style={{
+                            background : 'none',
+                            border     : 'none',
+                            cursor     : 'pointer',
+                            fontSize   : '16px',
+                            padding    : 0,
+                            lineHeight : 1,
+                            opacity    : r.priority ? 1 : 0.25,
+                            transition : 'opacity 0.15s',
+                          }}
+                        >
+                          ⭐
+                        </button>
+                      ) : (
+                        <span style={{ display: 'inline-block', width: '16px' }} />
+                      )}
+                    </td>
                     <td style={{ padding: '10px 16px', fontSize: '13px', color: 'var(--green-deep)', fontWeight: 500, maxWidth: '200px' }}>
                       {r.name}
                     </td>
@@ -430,6 +602,28 @@ export default function AdminCoursesPage() {
                     </td>
                     <td style={{ padding: '10px 16px', fontSize: '11px', color: 'var(--text-light)', maxWidth: '220px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {r.notes ? r.notes.slice(0, 80) + (r.notes.length > 80 ? '…' : '') : '—'}
+                    </td>
+                    <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                      <button
+                        onClick={() => handleReenrich(r)}
+                        disabled={reenriching.has(r.id) || run10.active}
+                        title="Reset to pending so it will be re-enriched"
+                        style={{
+                          padding      : '4px 10px',
+                          borderRadius : 'var(--radius-sm)',
+                          background   : 'transparent',
+                          color        : reenriching.has(r.id) ? 'var(--text-light)' : 'var(--green-deep)',
+                          border       : '1px solid currentColor',
+                          fontSize     : '11px',
+                          fontWeight   : 600,
+                          cursor       : (reenriching.has(r.id) || run10.active) ? 'not-allowed' : 'pointer',
+                          opacity      : run10.active ? 0.4 : 1,
+                          fontFamily   : 'var(--font-sans)',
+                          letterSpacing: '0.03em',
+                        }}
+                      >
+                        {reenriching.has(r.id) ? '…' : '↺ Re-enrich'}
+                      </button>
                     </td>
                   </tr>
                 ))}
