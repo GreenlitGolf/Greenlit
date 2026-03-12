@@ -1069,6 +1069,10 @@ export default function AccommodationsPage() {
     if (navId === 'report')   { router.push(`/trip/${id}/report`);         return }
     if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);      return }
     if (navId === 'budget')   { router.push(`/trip/${id}/budget`);         return }
+    if (navId === 'itinerary' || navId === 'group' || navId === 'concierge') {
+      router.push(`/trip/${id}?tab=${navId}`)
+      return
+    }
     router.push(`/trip/${id}`)
   }
 

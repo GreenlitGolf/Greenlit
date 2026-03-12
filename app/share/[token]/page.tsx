@@ -258,51 +258,33 @@ export default async function ShareQuickView({
                       Day {dayNum} — {fmtCompact(date)}
                     </div>
 
-                    {/* Items inline */}
-                    <div style={{ fontSize: '13px', color: 'var(--text-dark)', lineHeight: 1.9, fontWeight: 300 }}>
-                      {dayItems.length > 0 ? dayItems.map((item, idx) => (
-                        <span key={item.id}>
-                          {idx > 0 && (
-                            <span style={{ color: 'var(--cream-dark)', margin: '0 8px', userSelect: 'none' }}>·</span>
-                          )}
+                    {/* Items — stacked rows */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {dayItems.length > 0 ? dayItems.map((item) => (
+                        <div key={item.id} style={{
+                          fontSize: '13px', color: 'var(--text-dark)', lineHeight: 1.6, fontWeight: 300,
+                          display: 'flex', alignItems: 'center', gap: '6px',
+                          ...(item.type === 'tee_time' ? {
+                            padding: '6px 10px', background: 'var(--cream)',
+                            borderRadius: '6px', fontWeight: 500, color: 'var(--green-deep)',
+                          } : {}),
+                        }}>
+                          {item.type === 'tee_time' && <span>⛳</span>}
                           {item.start_time && (
-                            <span style={{ color: 'var(--text-light)', marginRight: '4px', fontSize: '12px' }}>
+                            <span style={{
+                              color: item.type === 'tee_time' ? 'var(--green-deep)' : 'var(--text-light)',
+                              fontSize: '12px', minWidth: '62px',
+                            }}>
                               {item.start_time}
                             </span>
                           )}
-                          {item.type === 'tee_time' ? (
-                            <strong style={{ fontWeight: 600, color: 'var(--green-deep)' }}>{item.title}</strong>
-                          ) : (
-                            <span>{item.title}</span>
-                          )}
-                        </span>
+                          {!item.start_time && <span style={{ minWidth: '62px' }} />}
+                          <span>{item.title}</span>
+                        </div>
                       )) : (
-                        <span style={{ color: 'var(--text-light)', fontStyle: 'italic' }}>No items planned yet.</span>
+                        <span style={{ fontSize: '13px', color: 'var(--text-light)', fontStyle: 'italic', fontWeight: 300 }}>No items planned yet.</span>
                       )}
                     </div>
-
-                    {/* Tee times for this day — highlighted rows */}
-                    {dayTeeTimes.length > 0 && dayTeeTimes.map((tt) => (
-                      <div key={tt.id} style={{
-                        marginTop: '8px', padding: '8px 12px',
-                        background: 'var(--cream)', borderRadius: '6px',
-                        fontSize: '13px', color: 'var(--green-deep)', fontWeight: 500,
-                        display: 'flex', alignItems: 'center', gap: '6px',
-                      }}>
-                        <span>⛳</span>
-                        <span>{fmtTime12(tt.tee_time)}</span>
-                        <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>·</span>
-                        <span>{tt.course_name}</span>
-                        {tt.confirmation_number && (
-                          <>
-                            <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>·</span>
-                            <span style={{ fontSize: '12px', color: 'var(--text-mid)', fontWeight: 400 }}>
-                              Confirmation: #{tt.confirmation_number}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    ))}
 
                     {/* Day note */}
                     {dayNote && (
@@ -352,7 +334,7 @@ export default async function ShareQuickView({
               <span style={{ fontSize: '15px' }}>💰</span>
               <span>Estimated cost</span>
               <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>·</span>
-              <span style={{ fontWeight: 600 }}>${perPersonCost.toLocaleString()} per person</span>
+              <span style={{ fontWeight: 600 }}>${perPersonCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per person</span>
             </div>
           )}
 

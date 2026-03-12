@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/context/AuthContext'
@@ -2163,6 +2163,11 @@ export default function TripPage() {
   const { id }      = useParams()
   const { session } = useAuth()
   const router      = useRouter()
+  const searchParams = useSearchParams()
+
+  const VALID_TABS = ['concierge', 'itinerary', 'group']
+  const initialTab = searchParams.get('tab')
+  const defaultNav = initialTab && VALID_TABS.includes(initialTab) ? initialTab : 'concierge'
 
   const [trip,      setTrip]      = useState<Trip | null>(null)
   const [members,   setMembers]   = useState<TripMember[]>([])
@@ -2170,7 +2175,7 @@ export default function TripPage() {
   const [error,     setError]     = useState('')
   const [copied,    setCopied]    = useState(false)
   const [editing,   setEditing]   = useState(false)
-  const [activeNav, setActiveNav] = useState('concierge')
+  const [activeNav, setActiveNav] = useState(defaultNav)
 
   const isOrganizer = trip?.created_by === session?.user.id
 

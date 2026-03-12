@@ -85,7 +85,7 @@ function formatTime12(s: string): string {
 function formatMoney(n: number): string {
   return n.toLocaleString('en-US', {
     style: 'currency', currency: 'USD',
-    minimumFractionDigits: 0, maximumFractionDigits: 2,
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
   })
 }
 
@@ -923,6 +923,10 @@ export default function TeeTimesPage() {
     if (navId === 'report')   { router.push(`/trip/${id}/report`);         return }
     if (navId === 'budget')   { router.push(`/trip/${id}/budget`);         return }
     if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }
+    if (navId === 'itinerary' || navId === 'group' || navId === 'concierge') {
+      router.push(`/trip/${id}?tab=${navId}`)
+      return
+    }
     router.push(`/trip/${id}`)
   }
 
@@ -997,28 +1001,26 @@ export default function TeeTimesPage() {
       }
     }
 
-    // Budget integration — upsert green fee line item
+    // Budget integration — sync green fee line item (delete + insert to avoid duplicates)
     if (saved) {
       try {
+        // Always delete existing budget items for this tee time first
+        await supabase.from('budget_items')
+          .delete()
+          .eq('source_type', 'tee_time')
+          .eq('source_id', saved.id)
+
+        // Re-insert if green fee data is present
         if (saved.green_fee_per_player != null && saved.num_players != null) {
-          await supabase.from('budget_items').upsert(
-            {
-              trip_id:     id,
-              category:    'green_fees',
-              label:       `Green Fees — ${saved.course_name}`,
-              amount:      saved.green_fee_per_player * saved.num_players,
-              source_type: 'tee_time',
-              source_id:   saved.id,
-              added_by:    session?.user.id ?? null,
-            },
-            { onConflict: 'source_type,source_id' }
-          )
-        } else {
-          // Green fee removed — delete any existing budget item
-          await supabase.from('budget_items')
-            .delete()
-            .eq('source_type', 'tee_time')
-            .eq('source_id', saved.id)
+          await supabase.from('budget_items').insert({
+            trip_id:     id,
+            category:    'green_fees',
+            label:       `Green Fees — ${saved.course_name}`,
+            amount:      saved.green_fee_per_player * saved.num_players,
+            source_type: 'tee_time',
+            source_id:   saved.id,
+            added_by:    session?.user.id ?? null,
+          })
         }
       } catch {
         // Budget table may not exist yet; ignore silently

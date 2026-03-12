@@ -914,7 +914,34 @@ export default function BudgetPage() {
     ])
 
     if (tripRes.data)  setTrip(tripRes.data)
-    if (itemsRes.data) setItems(itemsRes.data as BudgetItem[])
+    if (itemsRes.data) {
+      const raw = itemsRes.data as BudgetItem[]
+      // Deduplicate: keep only the latest budget item per (source_type, source_id)
+      const seen = new Map<string, BudgetItem>()
+      const dupeIds: string[] = []
+      for (const item of raw) {
+        if (item.source_type && item.source_id) {
+          const key = `${item.source_type}:${item.source_id}`
+          const prev = seen.get(key)
+          if (prev) {
+            // Keep the newer one, mark older for deletion
+            if (new Date(item.created_at) > new Date(prev.created_at)) {
+              dupeIds.push(prev.id)
+              seen.set(key, item)
+            } else {
+              dupeIds.push(item.id)
+            }
+          } else {
+            seen.set(key, item)
+          }
+        }
+      }
+      // Clean up duplicates in background
+      if (dupeIds.length > 0) {
+        supabase.from('budget_items').delete().in('id', dupeIds).then(() => {})
+      }
+      setItems(raw.filter(i => !dupeIds.includes(i.id)))
+    }
     if (ttRes.data)    setTeeTimes(ttRes.data as TeeTime[])
     if (accRes.data)   setAccs(accRes.data as Acc[])
 
@@ -1154,6 +1181,10 @@ export default function BudgetPage() {
     if (navId === 'report')   { router.push(`/trip/${id}/report`);         return }
     if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);      return }
     if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }
+    if (navId === 'itinerary' || navId === 'group' || navId === 'concierge') {
+      router.push(`/trip/${id}?tab=${navId}`)
+      return
+    }
     router.push(`/trip/${id}`)
   }
 

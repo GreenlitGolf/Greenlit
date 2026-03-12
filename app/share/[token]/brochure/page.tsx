@@ -369,17 +369,17 @@ export default async function BrochurePage({
     .filter((f) => f > 0)
   if (teeTimeFees.length > 0) {
     const minFee = Math.min(...teeTimeFees)
-    estFeesValue = `From $${minFee.toLocaleString()} per golfer`
+    estFeesValue = `From $${minFee.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per golfer`
   } else {
     const greenFeeBudget = budgetItems
       .filter((b) => b.category === 'green_fees')
       .reduce((sum, b) => sum + Number(b.amount), 0)
     if (greenFeeBudget > 0) {
       const perGolfer = Math.round(greenFeeBudget / memberCount)
-      estFeesValue = `From $${perGolfer.toLocaleString()} per golfer`
+      estFeesValue = `From $${perGolfer.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per golfer`
     } else {
       const courseFeesEst = orderedCourses.reduce((sum, c) => sum + (c.price_min ?? 0), 0)
-      estFeesValue = courseFeesEst > 0 ? `From $${courseFeesEst.toLocaleString()} per golfer` : 'Contact courses'
+      estFeesValue = courseFeesEst > 0 ? `From $${courseFeesEst.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per golfer` : 'Contact courses'
     }
   }
 
@@ -796,10 +796,10 @@ export default async function BrochurePage({
                   </span>
                 </div>
                 <div style={{ width: '100px', textAlign: 'right', fontSize: '15px', color: 'var(--text-dark)', fontWeight: 400 }}>
-                  ${total.toLocaleString()}
+                  ${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
                 <div style={{ width: '100px', textAlign: 'right', fontSize: '15px', color: 'var(--text-mid)', fontWeight: 400, marginLeft: '24px' }}>
-                  ${perPerson.toLocaleString()}
+                  ${perPerson.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </div>
               </div>
             ))}
@@ -815,10 +815,10 @@ export default async function BrochurePage({
                 </span>
               </div>
               <div style={{ width: '100px', textAlign: 'right', fontSize: '16px', color: 'var(--green-deep)', fontWeight: 700 }}>
-                ${budgetTotal.toLocaleString()}
+                ${budgetTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <div style={{ width: '100px', textAlign: 'right', fontSize: '16px', color: 'var(--green-deep)', fontWeight: 700, marginLeft: '24px' }}>
-                ${budgetTotalPerPerson.toLocaleString()}
+                ${budgetTotalPerPerson.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
             </div>
 

@@ -118,10 +118,11 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
   // Photo strip uses indexes 1, 2, 3 (skip 0 which is the hero)
   const stripPhotos = photos.slice(1, 4) // up to 3 additional photos
 
+  const fmtPrice = (n: number) => n % 1 === 0 ? `$${n}` : `$${n.toFixed(2)}`
   const priceLabel = course.price_min
     ? course.price_max && course.price_max !== course.price_min
-      ? `$${course.price_min}\u2013$${course.price_max}`
-      : `From $${course.price_min}`
+      ? `${fmtPrice(course.price_min)}\u2013${fmtPrice(course.price_max)}`
+      : `From ${fmtPrice(course.price_min)}`
     : null
 
   const { short: descShort, full: descFull, truncated: descTruncated } = firstParaTruncated(course.description)

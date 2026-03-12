@@ -995,6 +995,10 @@ export default function GamesPage() {
     if (navId === 'report')   { router.push(`/trip/${id}/report`);          return }
     if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);       return }
     if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`);  return }
+    if (navId === 'itinerary' || navId === 'group' || navId === 'concierge') {
+      router.push(`/trip/${id}?tab=${navId}`)
+      return
+    }
     router.push(`/trip/${id}`)
   }
 

@@ -289,7 +289,78 @@ export default function DashboardPage() {
         <div style={{ padding: '36px 48px', maxWidth: '960px' }}>
 
           {loading && (
-            <p style={{ fontSize: '13px', color: 'var(--text-light)', fontWeight: 300 }}>Loading trips…</p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+              {[1, 2, 3].map((i) => (
+                <div key={i} style={{
+                  background: 'var(--white)', borderRadius: 'var(--radius-lg)',
+                  border: '1px solid var(--cream-dark)', overflow: 'hidden',
+                }}>
+                  <div style={{ height: '5px', background: 'var(--cream-dark)' }} />
+                  <div style={{ padding: '20px' }}>
+                    {/* Label skeleton */}
+                    <div style={{
+                      width: '60px', height: '8px', borderRadius: '4px',
+                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 1.5s infinite',
+                      marginBottom: '10px',
+                    }} />
+                    {/* Title skeleton */}
+                    <div style={{
+                      width: '70%', height: '18px', borderRadius: '4px',
+                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 1.5s infinite',
+                      marginBottom: '10px',
+                    }} />
+                    {/* Destination skeleton */}
+                    <div style={{
+                      width: '50%', height: '12px', borderRadius: '4px',
+                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 1.5s infinite',
+                      marginBottom: '8px',
+                    }} />
+                    {/* Date skeleton */}
+                    <div style={{
+                      width: '40%', height: '11px', borderRadius: '4px',
+                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 1.5s infinite',
+                      marginBottom: '16px',
+                    }} />
+                    {/* Stats row skeleton */}
+                    <div style={{ display: 'flex', gap: '16px', paddingTop: '12px', borderTop: '1px solid var(--cream-dark)' }}>
+                      <div style={{
+                        width: '80px', height: '12px', borderRadius: '4px',
+                        background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
+                        backgroundSize: '200% 100%',
+                        animation: 'shimmer 1.5s infinite',
+                      }} />
+                      <div style={{
+                        width: '80px', height: '12px', borderRadius: '4px',
+                        background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
+                        backgroundSize: '200% 100%',
+                        animation: 'shimmer 1.5s infinite',
+                      }} />
+                    </div>
+                    {/* Progress bar skeleton */}
+                    <div style={{
+                      marginTop: '14px', height: '3px', borderRadius: '99px',
+                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
+                      backgroundSize: '200% 100%',
+                      animation: 'shimmer 1.5s infinite',
+                    }} />
+                  </div>
+                </div>
+              ))}
+              <style>{`
+                @keyframes shimmer {
+                  0% { background-position: 200% 0; }
+                  100% { background-position: -200% 0; }
+                }
+              `}</style>
+            </div>
           )}
 
           {!loading && trips.length === 0 && (
