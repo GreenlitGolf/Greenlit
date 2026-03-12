@@ -871,10 +871,11 @@ export default function BudgetPage() {
   const [expanded,  setExpanded]  = useState<Set<Category>>(new Set(CATEGORIES.map(c => c.id)))
   const [addingTo,  setAddingTo]  = useState<Category | null>(null)
   const [addForm,   setAddForm]   = useState<AddForm>(EMPTY_FORM('green_fees'))
-  const [addSaving, setAddSaving] = useState(false)
-  const [importing, setImporting] = useState(false)
-  const [copiedMsg, setCopiedMsg] = useState(false)
+  const [addSaving,  setAddSaving]  = useState(false)
+  const [importing,  setImporting]  = useState(false)
+  const [copiedMsg,  setCopiedMsg]  = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [importErr,  setImportErr]  = useState<string | null>(null)
 
   // ─── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -965,7 +966,10 @@ export default function BudgetPage() {
   async function handleImport() {
     if (importing) return
     setImporting(true)
+    setImportErr(null)
 
+    // Build inserts — omit per_person/notes so the insert works even if
+    // migration 010 hasn't been run (DB default false is correct for imports)
     const inserts: Record<string, unknown>[] = []
 
     for (const tt of importableTT) {
@@ -974,7 +978,6 @@ export default function BudgetPage() {
         category:    'green_fees',
         label:       `Green Fees — ${tt.course_name}`,
         amount:      (tt.green_fee_per_player ?? 0) * (tt.num_players ?? memberCount),
-        per_person:  false,
         source_type: 'tee_time',
         source_id:   tt.id,
         added_by:    session?.user.id ?? null,
@@ -987,7 +990,6 @@ export default function BudgetPage() {
         category:    'lodging',
         label:       `Lodging — ${acc.name}`,
         amount:      acc.total_cost!,
-        per_person:  false,
         source_type: 'accommodation',
         source_id:   acc.id,
         added_by:    session?.user.id ?? null,
@@ -995,12 +997,14 @@ export default function BudgetPage() {
     }
 
     if (inserts.length > 0) {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('budget_items')
         .upsert(inserts, { onConflict: 'source_type,source_id' })
         .select()
 
-      if (data) {
+      if (error) {
+        setImportErr(`Import failed: ${error.message}`)
+      } else if (data) {
         const newIds = new Set(items.map(i => i.id))
         const fresh  = (data as BudgetItem[]).filter(d => !newIds.has(d.id))
         setItems(prev => [...prev, ...fresh])
@@ -1039,25 +1043,43 @@ export default function BudgetPage() {
     if (!addForm.label.trim() || !addForm.amount || parseFloat(addForm.amount) <= 0) return
     setAddSaving(true)
 
-    const { data } = await supabase
+    // Base payload — works without migration 010
+    const base: Record<string, unknown> = {
+      trip_id:     id,
+      category:    addForm.category,
+      label:       addForm.label.trim(),
+      amount:      parseFloat(addForm.amount),
+      source_type: null,
+      source_id:   null,
+      added_by:    session?.user.id ?? null,
+    }
+
+    // Try with migration-010 columns first (per_person, notes)
+    const full = {
+      ...base,
+      per_person: addForm.per_person,
+      notes:      addForm.notes.trim() || null,
+    }
+
+    let { data, error } = await supabase
       .from('budget_items')
-      .insert({
-        trip_id:     id,
-        category:    addForm.category,
-        label:       addForm.label.trim(),
-        amount:      parseFloat(addForm.amount),
-        per_person:  addForm.per_person,
-        notes:       addForm.notes.trim() || null,
-        source_type: null,
-        source_id:   null,
-        added_by:    session?.user.id ?? null,
-      })
+      .insert(full)
       .select()
       .single()
 
+    // If unknown column error (migration 010 not run), retry without those fields
+    if (error) {
+      const retry = await supabase
+        .from('budget_items')
+        .insert(base)
+        .select()
+        .single()
+      data  = retry.data
+      error = retry.error
+    }
+
     if (data) {
       setItems(prev => [...prev, data as BudgetItem])
-      // Reset form in same category for quick multi-add
       setAddForm(EMPTY_FORM(addForm.category))
     }
 
@@ -1207,12 +1229,25 @@ export default function BudgetPage() {
 
                 {!showSections ? (
                   /* ── Empty state ── */
-                  <EmptyState
-                    hasImportable={hasImportable}
-                    importCount={importCount}
-                    onAddFirst={() => openAdd('green_fees')}
-                    onImport={handleImport}
-                  />
+                  <>
+                    {importErr && (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '12px 16px', borderRadius: 8, margin: '0 0 12px',
+                        background: '#fef2f2', border: '1px solid #fecaca',
+                      }}>
+                        <span style={{ fontSize: '14px' }}>⚠️</span>
+                        <span style={{ fontSize: '13px', color: '#b91c1c', flex: 1 }}>{importErr}</span>
+                        <button onClick={() => setImportErr(null)} style={{ fontSize: '16px', color: '#fca5a5', background: 'none', border: 'none', cursor: 'pointer' }}>×</button>
+                      </div>
+                    )}
+                    <EmptyState
+                      hasImportable={hasImportable}
+                      importCount={importCount}
+                      onAddFirst={() => openAdd('green_fees')}
+                      onImport={handleImport}
+                    />
+                  </>
                 ) : (
                   <>
                     {/* Import banner */}
@@ -1222,6 +1257,22 @@ export default function BudgetPage() {
                         importing={importing}
                         onImport={handleImport}
                       />
+                    )}
+
+                    {/* Import error */}
+                    {importErr && (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '12px 16px', borderRadius: 8, marginBottom: 12,
+                        background: '#fef2f2', border: '1px solid #fecaca',
+                      }}>
+                        <span style={{ fontSize: '14px' }}>⚠️</span>
+                        <span style={{ fontSize: '13px', color: '#b91c1c', flex: 1 }}>{importErr}</span>
+                        <button
+                          onClick={() => setImportErr(null)}
+                          style={{ fontSize: '16px', color: '#fca5a5', background: 'none', border: 'none', cursor: 'pointer' }}
+                        >×</button>
+                      </div>
                     )}
 
                     {/* Category accordion sections */}
