@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createAdminSupabaseClient } from '@/lib/supabase-server'
 import { anthropic } from '@/lib/anthropic'
 
 export async function POST(
@@ -7,17 +7,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: tripId } = await params
-  const supabase = createServerSupabaseClient()
-
-  const { data: session } = await supabase.auth.getUser()
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const supabase = createAdminSupabaseClient()
 
   // Gather trip context
   const [tripRes, membersRes, coursesRes, gamesRes, teesRes] = await Promise.all([
     supabase.from('trips').select('*').eq('id', tripId).single(),
-    supabase.from('trip_members').select('*, users(full_name)').eq('trip_id', tripId),
+    supabase.from('trip_members').select('id, user_id, display_name, email, handicap').eq('trip_id', tripId),
     supabase.from('trip_courses').select('course_name, course_id').eq('trip_id', tripId),
     supabase.from('trip_games').select('game_type, round_number').eq('trip_id', tripId),
     supabase.from('tee_times').select('course_name, tee_date').eq('trip_id', tripId).order('tee_date'),
@@ -26,16 +21,16 @@ export async function POST(
   const trip = tripRes.data
   const members = membersRes.data ?? []
   const courses = coursesRes.data ?? []
-  const existingGames = gamesRes.data ?? []
+  const existingGames = gamesRes.error ? [] : gamesRes.data ?? []
   const teeTimes = teesRes.data ?? []
 
   if (!trip) return NextResponse.json({ error: 'Trip not found' }, { status: 404 })
 
   const playerCount = members.length
   const handicaps = members
-    .map((m) => ({
-      name: m.users?.full_name ?? m.display_name ?? 'Player',
-      handicap: m.trip_handicap ?? m.handicap ?? null,
+    .map((m: Record<string, unknown>) => ({
+      name: (m.display_name as string) ?? (m.email as string) ?? 'Player',
+      handicap: (m.handicap as number) ?? null,
     }))
 
   // Calculate rounds from tee times or trip duration

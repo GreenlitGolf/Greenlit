@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createAdminSupabaseClient } from '@/lib/supabase-server'
 
 // GET — all scores for a game
 export async function GET(
@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string; gameId: string }> },
 ) {
   const { gameId } = await params
-  const supabase = createServerSupabaseClient()
+  const supabase = createAdminSupabaseClient()
 
   const { data, error } = await supabase
     .from('game_scores')
@@ -26,12 +26,7 @@ export async function POST(
 ) {
   const { gameId } = await params
   const body = await req.json()
-  const supabase = createServerSupabaseClient()
-
-  const { data: session } = await supabase.auth.getUser()
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const supabase = createAdminSupabaseClient()
 
   // body.scores: Array<{ player_id, hole_number?, gross_score, net_score?, points?, notes? }>
   const scores = (body.scores ?? []).map((s: Record<string, unknown>) => ({

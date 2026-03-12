@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createAdminSupabaseClient } from '@/lib/supabase-server'
 
 // GET — payouts for a game
 export async function GET(
@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string; gameId: string }> },
 ) {
   const { id: tripId, gameId } = await params
-  const supabase = createServerSupabaseClient()
+  const supabase = createAdminSupabaseClient()
 
   const { data, error } = await supabase
     .from('game_payouts')
@@ -27,12 +27,7 @@ export async function POST(
 ) {
   const { id: tripId, gameId } = await params
   const body = await req.json()
-  const supabase = createServerSupabaseClient()
-
-  const { data: session } = await supabase.auth.getUser()
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const supabase = createAdminSupabaseClient()
 
   // body.payouts: Array<{ from_player_id, to_player_id, amount, description? }>
   const rows = (body.payouts ?? []).map((p: Record<string, unknown>) => ({
@@ -61,7 +56,7 @@ export async function PATCH(
 ) {
   const { id: tripId } = await params
   const body = await req.json()
-  const supabase = createServerSupabaseClient()
+  const supabase = createAdminSupabaseClient()
 
   const payoutId = body.payout_id
   if (!payoutId) return NextResponse.json({ error: 'payout_id required' }, { status: 400 })
@@ -77,18 +72,15 @@ export async function PATCH(
   if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 })
 
   // Auto-create budget item for settled payout
-  await supabase.from('budget_items').upsert(
-    {
-      trip_id: tripId,
-      category: 'golf_games',
-      label: payout.description || 'Golf Games Payout',
-      amount: payout.amount,
-      source_type: 'game_payout',
-      source_id: payout.id,
-      added_by: payout.from_player_id,
-    },
-    { onConflict: 'source_type,source_id' },
-  )
+  await supabase.from('budget_items').insert({
+    trip_id: tripId,
+    category: 'golf_games',
+    label: payout.description || 'Golf Games Payout',
+    amount: payout.amount,
+    source_type: 'game_payout',
+    source_id: payout.id,
+    added_by: payout.from_player_id,
+  })
 
   return NextResponse.json(payout)
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerSupabaseClient } from '@/lib/supabase-server'
+import { createAdminSupabaseClient } from '@/lib/supabase-server'
 
 // GET — list games for a trip (with pairings)
 export async function GET(
@@ -7,7 +7,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: tripId } = await params
-  const supabase = createServerSupabaseClient()
+  const supabase = createAdminSupabaseClient()
 
   const { data: games, error } = await supabase
     .from('trip_games')
@@ -26,12 +26,7 @@ export async function POST(
 ) {
   const { id: tripId } = await params
   const body = await req.json()
-  const supabase = createServerSupabaseClient()
-
-  const { data: session } = await supabase.auth.getUser()
-  if (!session?.user) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const supabase = createAdminSupabaseClient()
 
   const { pairings, ...gameData } = body
 
@@ -46,7 +41,7 @@ export async function POST(
       game_config: gameData.game_config ?? {},
       stakes_per_unit: gameData.stakes_per_unit ?? 0,
       status: 'setup',
-      created_by: session.user.id,
+      created_by: gameData.created_by ?? null,
     })
     .select()
     .single()
@@ -77,7 +72,7 @@ export async function DELETE(
   const gameId = req.nextUrl.searchParams.get('game_id')
   if (!gameId) return NextResponse.json({ error: 'game_id required' }, { status: 400 })
 
-  const supabase = createServerSupabaseClient()
+  const supabase = createAdminSupabaseClient()
   const { error } = await supabase.from('trip_games').delete().eq('id', gameId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })
