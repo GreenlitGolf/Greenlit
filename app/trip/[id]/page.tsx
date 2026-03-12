@@ -2098,6 +2098,7 @@ export default function TripPage() {
                 if (navId === 'report')    { router.push(`/trip/${id}/report`);         return }
                 if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);      return }
                 if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }
+                if (navId === 'budget')   { router.push(`/trip/${id}/budget`);         return }
                 setEditing(false); setActiveNav(navId)
               }}
             tripName={trip.name}
