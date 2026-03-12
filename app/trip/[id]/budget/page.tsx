@@ -1119,7 +1119,8 @@ export default function BudgetPage() {
 
   // ─── Render ───────────────────────────────────────────────────────────────────
 
-  const hasItems = items.length > 0
+  const hasItems    = items.length > 0
+  const showSections = hasItems || addingTo !== null
 
   return (
     <ProtectedRoute>
@@ -1204,7 +1205,7 @@ export default function BudgetPage() {
               {/* Scrollable content */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '20px 48px 60px' }}>
 
-                {!hasItems ? (
+                {!showSections ? (
                   /* ── Empty state ── */
                   <EmptyState
                     hasImportable={hasImportable}
