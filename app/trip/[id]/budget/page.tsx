@@ -997,9 +997,13 @@ export default function BudgetPage() {
     }
 
     if (inserts.length > 0) {
+      // Use insert (not upsert) — importableTT/Acc are pre-filtered to items
+      // that don't exist yet, so there's no risk of duplicates. The partial
+      // unique index on (source_type, source_id) can't be used by PostgREST's
+      // ON CONFLICT clause anyway.
       const { data, error } = await supabase
         .from('budget_items')
-        .upsert(inserts, { onConflict: 'source_type,source_id' })
+        .insert(inserts)
         .select()
 
       if (error) {
