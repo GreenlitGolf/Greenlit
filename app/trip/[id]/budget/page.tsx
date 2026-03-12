@@ -911,11 +911,22 @@ export default function BudgetPage() {
         .eq('trip_id', id),
     ])
 
-    if (tripRes.data)    setTrip(tripRes.data)
-    if (membersRes.data) setMembers(membersRes.data as unknown as Member[])
-    if (itemsRes.data)   setItems(itemsRes.data as BudgetItem[])
-    if (ttRes.data)      setTeeTimes(ttRes.data as TeeTime[])
-    if (accRes.data)     setAccs(accRes.data as Acc[])
+    if (tripRes.data)  setTrip(tripRes.data)
+    if (itemsRes.data) setItems(itemsRes.data as BudgetItem[])
+    if (ttRes.data)    setTeeTimes(ttRes.data as TeeTime[])
+    if (accRes.data)   setAccs(accRes.data as Acc[])
+
+    // Members — full query includes display_name + users join (requires migration 007).
+    // If that 400s, fall back to a minimal query so memberCount is still correct.
+    if (membersRes.data) {
+      setMembers(membersRes.data as unknown as Member[])
+    } else {
+      const { data: fallback } = await supabase
+        .from('trip_members')
+        .select('id,user_id,role,member_type')
+        .eq('trip_id', id)
+      if (fallback) setMembers(fallback as unknown as Member[])
+    }
 
     // Expand only categories that have items (after first load with data)
     if (itemsRes.data && itemsRes.data.length > 0) {
