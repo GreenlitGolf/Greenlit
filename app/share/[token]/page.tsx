@@ -108,19 +108,21 @@ export default async function ShareQuickView({
 
   if (!trip) return notFound()
 
-  // Fetch member count, items, customizations, tee times, accommodations in parallel
+  // Fetch member count, items, customizations, tee times, accommodations, budget in parallel
   const [
     { count: memberCount },
     { data: rawItems },
     { data: custom },
     { data: teeTimesRaw },
     { data: accommodationsRaw },
+    { data: budgetItemsRaw },
   ] = await Promise.all([
     supabase.from('trip_members').select('*', { count: 'exact', head: true }).eq('trip_id', trip.id),
     supabase.from('itinerary_items').select('id, day_number, start_time, title, type').eq('trip_id', trip.id),
     supabase.from('trip_report_customizations').select('tagline, day_notes, cover_photo_url').eq('trip_id', trip.id).single(),
     supabase.from('tee_times').select('id, course_name, tee_date, tee_time, num_players, confirmation_number, green_fee_per_player').eq('trip_id', trip.id).order('tee_date').order('tee_time'),
     supabase.from('accommodations').select('id, name, check_in_date, check_out_date, confirmation_number').eq('trip_id', trip.id).order('check_in_date'),
+    supabase.from('budget_items').select('amount, per_person').eq('trip_id', trip.id),
   ])
 
   const items: RawItem[] = (rawItems || []).sort((a, b) => {
@@ -133,6 +135,15 @@ export default async function ShareQuickView({
 
   const teeTimes: TeeTime[] = (teeTimesRaw || []) as TeeTime[]
   const accommodations: Accommodation[] = (accommodationsRaw || []) as Accommodation[]
+
+  // Calculate per-person cost from budget items
+  const members = memberCount ?? 1
+  const budgetItems = (budgetItemsRaw || []) as Array<{ amount: number; per_person: boolean }>
+  let totalCost = 0
+  for (const bi of budgetItems) {
+    totalCost += bi.per_person ? bi.amount * members : bi.amount
+  }
+  const perPersonCost = members > 0 ? Math.round(totalCost / members) : 0
 
   // Group tee times by date for quick lookup
   const teeTimesByDate: Record<string, TeeTime[]> = {}
@@ -328,6 +339,20 @@ export default async function ShareQuickView({
                   </span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* ── Per-person cost ── */}
+          {budgetItems.length > 0 && perPersonCost > 0 && (
+            <div style={{
+              marginTop: '28px', padding: '12px 0',
+              fontSize: '14px', color: 'var(--green-deep)', fontWeight: 500,
+              display: 'flex', alignItems: 'center', gap: '6px',
+            }}>
+              <span style={{ fontSize: '15px' }}>💰</span>
+              <span>Estimated cost</span>
+              <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>·</span>
+              <span style={{ fontWeight: 600 }}>${perPersonCost.toLocaleString()} per person</span>
             </div>
           )}
 

@@ -1081,6 +1081,20 @@ function TripItinerarySection({
   const [uploading,       setUploading]       = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Confirmed booking state
+  type BookedTeeTime = {
+    id: string; trip_id: string; course_id: string | null; course_name: string;
+    tee_date: string; tee_time: string; num_players: number | null;
+    confirmation_number: string | null; green_fee_per_player: number | null;
+  }
+  type BookedAccommodation = {
+    id: string; trip_id: string; name: string;
+    check_in_date: string; check_out_date: string;
+    check_in_time: string | null; check_out_time: string | null;
+  }
+  const [bookedTeeTimes,     setBookedTeeTimes]     = useState<BookedTeeTime[]>([])
+  const [bookedAccommodations, setBookedAccommodations] = useState<BookedAccommodation[]>([])
+
   const tripDays = getTripDays(trip.start_date, trip.end_date)
 
   const appUrl     = typeof window !== 'undefined' ? window.location.origin : ''
@@ -1091,6 +1105,7 @@ function TripItinerarySection({
     fetchItems()
     fetchTripCourses()
     fetchCustomizations()
+    fetchBookedData()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId])
 
@@ -1102,6 +1117,15 @@ function TripItinerarySection({
       .eq('trip_id', tripId)
     setItems(data || [])
     setLoading(false)
+  }
+
+  async function fetchBookedData() {
+    const [{ data: tt }, { data: acc }] = await Promise.all([
+      supabase.from('tee_times').select('id, trip_id, course_id, course_name, tee_date, tee_time, num_players, confirmation_number, green_fee_per_player').eq('trip_id', tripId).order('tee_date').order('tee_time'),
+      supabase.from('accommodations').select('id, trip_id, name, check_in_date, check_out_date, check_in_time, check_out_time').eq('trip_id', tripId).order('check_in_date'),
+    ])
+    setBookedTeeTimes((tt || []) as BookedTeeTime[])
+    setBookedAccommodations((acc || []) as BookedAccommodation[])
   }
 
   async function fetchTripCourses() {
@@ -1175,6 +1199,89 @@ function TripItinerarySection({
     await supabase.from('itinerary_items').delete().eq('id', id)
     setItems((prev) => prev.filter((i) => i.id !== id))
     setConfirmDelId(null)
+  }
+
+  // ── Booking mismatch helpers ────────────────────────────────────────────
+  function dateToDayNum(dateStr: string): number {
+    if (!trip.start_date) return -1
+    const d = new Date(dateStr + 'T12:00:00')
+    const s = new Date(trip.start_date + 'T12:00:00')
+    return Math.round((d.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1
+  }
+
+  function fmtTime12(time: string): string {
+    const [hStr, mStr] = time.split(':')
+    let h = parseInt(hStr, 10)
+    const m = parseInt(mStr, 10)
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    if (h > 12) h -= 12
+    if (h === 0) h = 12
+    return `${h}:${m.toString().padStart(2, '0')} ${ampm}`
+  }
+
+  function fmtDateShort(dateStr: string): string {
+    return new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  function getMissingTeeTimes(dayNum: number) {
+    return bookedTeeTimes.filter((tt) => {
+      const ttDay = dateToDayNum(tt.tee_date)
+      if (ttDay !== dayNum) return false
+      // Check if any itinerary item matches this tee time (same day + course_id + type)
+      return !items.some((item) =>
+        item.day_number === dayNum &&
+        item.type === 'tee_time' &&
+        item.course_id === tt.course_id
+      )
+    })
+  }
+
+  function getMissingAccommodations(dayNum: number) {
+    return bookedAccommodations.filter((acc) => {
+      const checkInDay = dateToDayNum(acc.check_in_date)
+      if (checkInDay !== dayNum) return false
+      // Check if an accommodation item already exists for this day mentioning this property
+      return !items.some((item) =>
+        item.day_number === dayNum &&
+        item.type === 'accommodation' &&
+        item.title.toLowerCase().includes(acc.name.toLowerCase())
+      )
+    })
+  }
+
+  async function addTeeTimeToItinerary(tt: BookedTeeTime) {
+    const dayNum = dateToDayNum(tt.tee_date)
+    if (dayNum < 1) return
+    const payload = {
+      trip_id:     tripId,
+      day_number:  dayNum,
+      start_time:  fmtTime12(tt.tee_time),
+      title:       tt.course_name,
+      description: null,
+      type:        'tee_time' as const,
+      course_id:   tt.course_id || null,
+      created_by:  currentUserId ?? null,
+    }
+    const { data } = await supabase.from('itinerary_items').insert(payload).select().single()
+    if (data) setItems((prev) => [...prev, data])
+  }
+
+  async function addAccommodationToItinerary(acc: BookedAccommodation) {
+    const dayNum = dateToDayNum(acc.check_in_date)
+    if (dayNum < 1) return
+    const checkInTime = acc.check_in_time ? fmtTime12(acc.check_in_time) : '3:00 PM'
+    const payload = {
+      trip_id:     tripId,
+      day_number:  dayNum,
+      start_time:  checkInTime,
+      title:       `Check in — ${acc.name}`,
+      description: null,
+      type:        'accommodation' as const,
+      course_id:   null,
+      created_by:  currentUserId ?? null,
+    }
+    const { data } = await supabase.from('itinerary_items').insert(payload).select().single()
+    if (data) setItems((prev) => [...prev, data])
   }
 
   async function fetchCustomizations() {
@@ -1451,6 +1558,56 @@ function TripItinerarySection({
                       </h3>
                       <div style={{ flex: 1, height: '1px', background: 'var(--cream-dark)' }} />
                     </div>
+
+                    {/* Booking mismatch banners */}
+                    {getMissingTeeTimes(dayNum).map((tt) => (
+                      <div key={`miss-tt-${tt.id}`} style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        background: '#FEF9E7', border: '1px solid #F0D567',
+                        borderRadius: 'var(--radius-md)', padding: '10px 14px',
+                        marginBottom: '8px', fontSize: '13px', color: '#7A6100',
+                      }}>
+                        <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+                        <span style={{ flex: 1 }}>
+                          Confirmed tee time not on itinerary — <strong>{fmtTime12(tt.tee_time)} {tt.course_name}</strong>
+                        </span>
+                        <button
+                          onClick={() => addTeeTimeToItinerary(tt)}
+                          style={{
+                            background: 'none', border: '1px solid #D4A900',
+                            borderRadius: '6px', padding: '4px 12px', fontSize: '12px',
+                            fontWeight: 600, color: '#7A6100', cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Add to Itinerary
+                        </button>
+                      </div>
+                    ))}
+                    {getMissingAccommodations(dayNum).map((acc) => (
+                      <div key={`miss-acc-${acc.id}`} style={{
+                        display: 'flex', alignItems: 'center', gap: '10px',
+                        background: '#FEF9E7', border: '1px solid #F0D567',
+                        borderRadius: 'var(--radius-md)', padding: '10px 14px',
+                        marginBottom: '8px', fontSize: '13px', color: '#7A6100',
+                      }}>
+                        <span style={{ fontSize: '16px', flexShrink: 0 }}>⚠️</span>
+                        <span style={{ flex: 1 }}>
+                          Accommodation not on itinerary — <strong>{acc.name}</strong> (Check-in {fmtDateShort(acc.check_in_date)})
+                        </span>
+                        <button
+                          onClick={() => addAccommodationToItinerary(acc)}
+                          style={{
+                            background: 'none', border: '1px solid #D4A900',
+                            borderRadius: '6px', padding: '4px 12px', fontSize: '12px',
+                            fontWeight: 600, color: '#7A6100', cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          Add to Itinerary
+                        </button>
+                      </div>
+                    ))}
 
                     {/* Items */}
                     {dayItems.length > 0 ? (

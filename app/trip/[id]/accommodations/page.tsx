@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import Sidebar from '@/components/ui/Sidebar'
 import type { NavItem } from '@/components/ui/Sidebar'
+import { syncAccommodationToItinerary, removeAccommodationFromItinerary } from '@/lib/syncItinerary'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1207,6 +1208,13 @@ export default function AccommodationsPage() {
       } catch { /* ignore */ }
     }
 
+    // Itinerary sync — insert check-in/check-out items
+    if (saved && trip?.start_date) {
+      try {
+        await syncAccommodationToItinerary(supabase, saved, trip.start_date, session?.user.id ?? null)
+      } catch { /* itinerary sync is best-effort */ }
+    }
+
     setSaving(false)
     setDrawerOpen(false)
   }
@@ -1220,6 +1228,12 @@ export default function AccommodationsPage() {
       await supabase.from('budget_items')
         .delete().eq('source_type', 'accommodation').eq('source_id', acc.id)
     } catch { /* ignore */ }
+    // Remove check-in/check-out itinerary items
+    if (trip?.start_date) {
+      try {
+        await removeAccommodationFromItinerary(supabase, acc, trip.start_date)
+      } catch { /* best-effort */ }
+    }
   }
 
   // ─── Scroll to card ──────────────────────────────────────────────────────────

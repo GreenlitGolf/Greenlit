@@ -8,6 +8,7 @@ import { useAuth } from '@/context/AuthContext'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import Sidebar from '@/components/ui/Sidebar'
 import type { NavItem } from '@/components/ui/Sidebar'
+import { syncTeeTimeToItinerary, removeTeeTimeFromItinerary } from '@/lib/syncItinerary'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1018,6 +1019,13 @@ export default function TeeTimesPage() {
       } catch {
         // Budget table may not exist yet; ignore silently
       }
+
+      // Itinerary sync — upsert matching itinerary item
+      if (trip?.start_date) {
+        try {
+          await syncTeeTimeToItinerary(supabase, saved, trip.start_date, session?.user.id ?? null)
+        } catch { /* itinerary sync is best-effort */ }
+      }
     }
 
     setSaving(false)
@@ -1033,6 +1041,12 @@ export default function TeeTimesPage() {
       await supabase.from('budget_items')
         .delete().eq('source_type', 'tee_time').eq('source_id', tt.id)
     } catch { /* ignore */ }
+    // Remove matching itinerary item
+    if (trip?.start_date) {
+      try {
+        await removeTeeTimeFromItinerary(supabase, tt, trip.start_date)
+      } catch { /* best-effort */ }
+    }
   }
 
   // ─── Computed values ────────────────────────────────────────────────────────

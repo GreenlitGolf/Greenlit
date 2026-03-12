@@ -19,6 +19,29 @@ const VALID_TYPES: ValidType[] = [
   'tee_time', 'travel', 'accommodation', 'meal', 'activity', 'other',
 ]
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function formatTime12(time: string): string {
+  const [hStr, mStr] = time.split(':')
+  let h = parseInt(hStr, 10)
+  const m = parseInt(mStr, 10)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  if (h > 12) h -= 12
+  if (h === 0) h = 12
+  return `${h}:${m.toString().padStart(2, '0')} ${ampm}`
+}
+
+function formatDateHuman(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+}
+
+function dateToDayNumber(date: string, tripStart: string): number {
+  const d = new Date(date + 'T12:00:00')
+  const s = new Date(tripStart + 'T12:00:00')
+  return Math.round((d.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1
+}
+
 // ─── System prompt ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = `You are a golf trip planning assistant. Given details about a group golf trip, generate a realistic day-by-day itinerary.
@@ -44,7 +67,8 @@ Guidelines:
 - Suggest realistic tee times: morning rounds 7:30–9:00 AM, afternoon rounds 1:00–2:00 PM
 - Be specific with meal suggestions based on the destination (don't just say "dinner")
 - Include 1-2 non-golf activities per trip (local sights, range session, 19th hole, etc.)
-- Keep descriptions concise but evocative — one sentence each`
+- Keep descriptions concise but evocative — one sentence each
+- CRITICAL: If confirmed bookings are provided below, you MUST include them in the itinerary at their exact times and dates. Do not move, rename, or omit confirmed bookings. Build the rest of the itinerary around them.`
 
 // ─── Route handler ────────────────────────────────────────────────────────────
 
@@ -66,25 +90,20 @@ export async function POST(
     return Response.json({ error: 'Trip not found' }, { status: 404 })
   }
 
-  // Fetch courses on this trip
-  const { data: tripCourses } = await supabase
-    .from('trip_courses')
-    .select('course_id, course_name')
-    .eq('trip_id', tripId)
-
-  // Fetch member count
-  const { count: memberCount } = await supabase
-    .from('trip_members')
-    .select('*', { count: 'exact', head: true })
-    .eq('trip_id', tripId)
-
-  // Fetch last 10 concierge messages for additional context
-  const { data: conciergeMessages } = await supabase
-    .from('concierge_messages')
-    .select('role, content')
-    .eq('trip_id', tripId)
-    .order('created_at', { ascending: false })
-    .limit(10)
+  // Fetch courses, members, concierge, tee times, and accommodations in parallel
+  const [
+    { data: tripCourses },
+    { count: memberCount },
+    { data: conciergeMessages },
+    { data: teeTimesRaw },
+    { data: accommodationsRaw },
+  ] = await Promise.all([
+    supabase.from('trip_courses').select('course_id, course_name').eq('trip_id', tripId),
+    supabase.from('trip_members').select('*', { count: 'exact', head: true }).eq('trip_id', tripId),
+    supabase.from('concierge_messages').select('role, content').eq('trip_id', tripId).order('created_at', { ascending: false }).limit(10),
+    supabase.from('tee_times').select('*').eq('trip_id', tripId).order('tee_date').order('tee_time'),
+    supabase.from('accommodations').select('*').eq('trip_id', tripId).order('check_in_date'),
+  ])
 
   // Calculate trip duration
   const startDate = trip.start_date ? new Date(trip.start_date + 'T12:00:00') : new Date()
@@ -107,12 +126,55 @@ export async function POST(
         .join('\n')
     : 'None'
 
+  // ── Build confirmed bookings block ──────────────────────────────────────
+  const teeTimes = teeTimesRaw || []
+  const accommodations = accommodationsRaw || []
+
+  let confirmedBlock = ''
+
+  if (teeTimes.length > 0 || accommodations.length > 0) {
+    const lines: string[] = [
+      '',
+      'The following are CONFIRMED bookings that must appear in the itinerary exactly as specified. Do not change their times, names, or dates.',
+    ]
+
+    if (teeTimes.length > 0) {
+      lines.push('', 'CONFIRMED TEE TIMES:')
+      for (const tt of teeTimes) {
+        const dayNum = trip.start_date ? dateToDayNumber(tt.tee_date, trip.start_date) : null
+        const dateStr = formatDateHuman(tt.tee_date)
+        const timeStr = formatTime12(tt.tee_time)
+        const parts = [`- ${dateStr} (Day ${dayNum}), ${timeStr}: ${tt.course_name}`]
+        const details: string[] = []
+        if (tt.num_players) details.push(`${tt.num_players} players`)
+        if (tt.green_fee_per_player) details.push(`$${tt.green_fee_per_player}/person`)
+        if (tt.confirmation_number) details.push(`confirmation #${tt.confirmation_number}`)
+        if (details.length > 0) parts[0] += ` (${details.join(', ')})`
+        lines.push(parts[0])
+      }
+    }
+
+    if (accommodations.length > 0) {
+      lines.push('', 'CONFIRMED ACCOMMODATIONS:')
+      for (const acc of accommodations) {
+        const checkInTime = acc.check_in_time ? formatTime12(acc.check_in_time) : '3:00 PM'
+        const checkOutTime = acc.check_out_time ? formatTime12(acc.check_out_time) : '11:00 AM'
+        lines.push(`- Check-in: ${formatDateHuman(acc.check_in_date)} at ${checkInTime} — ${acc.name}`)
+        lines.push(`- Check-out: ${formatDateHuman(acc.check_out_date)} at ${checkOutTime} — ${acc.name}`)
+      }
+    }
+
+    lines.push('', 'Generate the rest of the itinerary around these confirmed items — meals, travel, activities, evening plans. Do not invent or move the confirmed items.')
+    confirmedBlock = lines.join('\n')
+  }
+
   const userMessage = [
     `Trip: ${trip.name}`,
     `Destination: ${trip.destination || 'TBD'}`,
     `Dates: ${trip.start_date || 'TBD'} to ${trip.end_date || 'TBD'} (${dayCount} day${dayCount !== 1 ? 's' : ''})`,
     `Group size: ${memberCount ?? 1} golfer${(memberCount ?? 1) !== 1 ? 's' : ''}`,
     `Courses added to trip: ${courseList}`,
+    confirmedBlock,
     '',
     'Recent planning notes from concierge:',
     recentNotes,
