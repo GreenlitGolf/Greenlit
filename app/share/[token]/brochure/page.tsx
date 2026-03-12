@@ -4,6 +4,58 @@ import OrganizerBanner from '../OrganizerBanner'
 import BrochureCover from './BrochureCover'
 import BrochureCourseSection, { type BrochureCourse } from './BrochureCourseSection'
 
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type TeeTime = {
+  id: string
+  trip_id: string
+  course_id: string | null
+  course_name: string
+  tee_date: string
+  tee_time: string
+  num_players: number | null
+  confirmation_number: string | null
+  green_fee_per_player: number | null
+  cart_fee_per_player: number | null
+  notes: string | null
+}
+
+type Accommodation = {
+  id: string
+  trip_id: string
+  name: string
+  address: string | null
+  check_in_date: string
+  check_out_date: string
+  check_in_time: string | null
+  check_out_time: string | null
+  confirmation_number: string | null
+  num_rooms: number | null
+  cost_per_night: number | null
+  total_cost: number | null
+  notes: string | null
+}
+
+type BudgetItem = {
+  id: string
+  trip_id: string
+  category: string
+  label: string
+  amount: number
+  per_person: boolean
+  source_type: string | null
+  source_id: string | null
+  notes: string | null
+}
+
+type TripMember = {
+  id: string
+  trip_id: string
+  user_id: string | null
+  display_name: string | null
+  role: string
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function parseTimeToMinutes(time: string): number {
@@ -41,6 +93,55 @@ function fmtRange(start: string | null, end: string | null): string {
   return `${mo(s)}, ${s.getFullYear()} – ${mo(e)}, ${e.getFullYear()}`
 }
 
+function fmtTime12(time: string): string {
+  // Convert "HH:MM:SS" or "HH:MM" to "8:00 AM"
+  const [hStr, mStr] = time.split(':')
+  let h = parseInt(hStr, 10)
+  const m = parseInt(mStr, 10)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  if (h > 12) h -= 12
+  if (h === 0) h = 12
+  return `${h}:${m.toString().padStart(2, '0')} ${ampm}`
+}
+
+function fmtDateFull(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+}
+
+function fmtDateShort(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function fmtTimePretty(time: string | null): string {
+  if (!time) return ''
+  const [hStr, mStr] = time.split(':')
+  let h = parseInt(hStr, 10)
+  const m = parseInt(mStr, 10)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  if (h > 12) h -= 12
+  if (h === 0) h = 12
+  return `${h}:${m.toString().padStart(2, '0')} ${ampm}`
+}
+
+function nightsBetween(checkIn: string, checkOut: string): number {
+  const a = new Date(checkIn + 'T12:00:00')
+  const b = new Date(checkOut + 'T12:00:00')
+  return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+// Category config for budget display
+const CATEGORY_CONFIG: Record<string, { emoji: string; label: string; order: number }> = {
+  green_fees:    { emoji: '\u26F3', label: 'Green Fees',    order: 1 },
+  lodging:       { emoji: '\uD83C\uDFE8', label: 'Lodging',       order: 2 },
+  transport:     { emoji: '\uD83D\uDE97', label: 'Transport',     order: 3 },
+  food_drink:    { emoji: '\uD83C\uDF7A', label: 'Food & Drink',  order: 4 },
+  entertainment: { emoji: '\uD83C\uDFAD', label: 'Entertainment', order: 5 },
+  equipment:     { emoji: '\uD83C\uDFCC\uFE0F', label: 'Equipment',    order: 6 },
+  other:         { emoji: '\uD83D\uDCCB', label: 'Other',         order: 7 },
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function BrochurePage({
@@ -60,15 +161,18 @@ export default async function BrochurePage({
 
   if (!trip) return notFound()
 
-  // Parallel fetches
+  // Parallel fetches — now includes tee_times, accommodations, budget_items, members
   const [
-    { count: memberCount },
+    { data: membersRaw },
     { data: rawItems },
     { data: custom },
     { data: tripCoursesRaw },
     { data: organizerRaw },
+    { data: teeTimesRaw },
+    { data: accommodationsRaw },
+    { data: budgetItemsRaw },
   ] = await Promise.all([
-    supabase.from('trip_members').select('*', { count: 'exact', head: true }).eq('trip_id', trip.id),
+    supabase.from('trip_members').select('id, trip_id, user_id, display_name, role').eq('trip_id', trip.id),
     supabase.from('itinerary_items').select('id, day_number, start_time, title, type, course_id').eq('trip_id', trip.id),
     supabase.from('trip_report_customizations').select('tagline, day_notes, cover_photo_url').eq('trip_id', trip.id).single(),
     supabase.from('trip_courses').select(`
@@ -81,7 +185,16 @@ export default async function BrochurePage({
       )
     `).eq('trip_id', trip.id),
     supabase.from('users').select('full_name, email').eq('id', trip.created_by).single(),
+    supabase.from('tee_times').select('*').eq('trip_id', trip.id).order('tee_date').order('tee_time'),
+    supabase.from('accommodations').select('*').eq('trip_id', trip.id).order('check_in_date'),
+    supabase.from('budget_items').select('*').eq('trip_id', trip.id),
   ])
+
+  const members = (membersRaw || []) as unknown as TripMember[]
+  const memberCount = members.length || 1
+  const teeTimes: TeeTime[] = (teeTimesRaw || []) as TeeTime[]
+  const accommodations: Accommodation[] = (accommodationsRaw || []) as Accommodation[]
+  const budgetItems: BudgetItem[] = (budgetItemsRaw || []) as BudgetItem[]
 
   // Sort items
   const items = (rawItems || []).sort((a, b) => {
@@ -126,18 +239,64 @@ export default async function BrochurePage({
   const firstCourse  = orderedCourses[0] ?? null
   const year         = trip.start_date ? new Date(trip.start_date + 'T12:00:00').getFullYear() : new Date().getFullYear()
 
-  // Stats
-  const totalRounds = items.filter((i) => i.type === 'tee_time').length
-  const estFees     = orderedCourses.reduce((sum, c) => sum + (c.price_min ?? 0), 0)
+  // ── Dynamic stats ────────────────────────────────────────────────────────
+  const totalRounds = teeTimes.length > 0 ? teeTimes.length : orderedCourses.length
+
+  // Green fees: use lowest single tee time fee, or fall back to budget_items green_fees / member count
+  let estFeesValue = ''
+  const teeTimeFees = teeTimes
+    .map((t) => Number(t.green_fee_per_player))
+    .filter((f) => f > 0)
+  if (teeTimeFees.length > 0) {
+    const minFee = Math.min(...teeTimeFees)
+    estFeesValue = `From $${minFee.toLocaleString()} per golfer`
+  } else {
+    const greenFeeBudget = budgetItems
+      .filter((b) => b.category === 'green_fees')
+      .reduce((sum, b) => sum + Number(b.amount), 0)
+    if (greenFeeBudget > 0) {
+      const perGolfer = Math.round(greenFeeBudget / memberCount)
+      estFeesValue = `From $${perGolfer.toLocaleString()} per golfer`
+    } else {
+      const courseFeesEst = orderedCourses.reduce((sum, c) => sum + (c.price_min ?? 0), 0)
+      estFeesValue = courseFeesEst > 0 ? `From $${courseFeesEst.toLocaleString()} per golfer` : 'Contact courses'
+    }
+  }
 
   const stats = [
-    { icon: '📅', label: 'Dates',        value: fmtRange(trip.start_date, trip.end_date) },
-    { icon: '⛳', label: 'Courses',       value: `${orderedCourses.length} course${orderedCourses.length !== 1 ? 's' : ''}` },
-    { icon: '👥', label: 'Golfers',       value: `${memberCount ?? 1} golfer${(memberCount ?? 1) !== 1 ? 's' : ''}` },
-    { icon: '📍', label: 'Destination',   value: trip.destination || 'TBD' },
-    { icon: '🏌️', label: 'Total Rounds', value: `${totalRounds} round${totalRounds !== 1 ? 's' : ''}` },
-    { icon: '💰', label: 'Est. Green Fees', value: estFees > 0 ? `From $${estFees.toLocaleString()} per golfer` : 'Contact courses' },
+    { icon: '\uD83D\uDCC5', label: 'Dates',        value: fmtRange(trip.start_date, trip.end_date) },
+    { icon: '\u26F3',        label: 'Courses',       value: `${orderedCourses.length} course${orderedCourses.length !== 1 ? 's' : ''}` },
+    { icon: '\uD83D\uDC65',  label: 'Golfers',       value: `${memberCount} golfer${memberCount !== 1 ? 's' : ''}` },
+    { icon: '\uD83D\uDCCD',  label: 'Destination',   value: trip.destination || 'TBD' },
+    { icon: '\uD83C\uDFCC\uFE0F', label: 'Total Rounds', value: `${totalRounds} round${totalRounds !== 1 ? 's' : ''}` },
+    { icon: '\uD83D\uDCB0',  label: 'Est. Green Fees', value: estFeesValue },
   ]
+
+  // ── Tee Sheet data: group by date ────────────────────────────────────────
+  const teeTimesByDate: Record<string, TeeTime[]> = {}
+  for (const tt of teeTimes) {
+    if (!teeTimesByDate[tt.tee_date]) teeTimesByDate[tt.tee_date] = []
+    teeTimesByDate[tt.tee_date].push(tt)
+  }
+  const teeSheetDates = Object.keys(teeTimesByDate).sort()
+
+  // ── Budget data: aggregate by category ───────────────────────────────────
+  const budgetByCategory: Record<string, number> = {}
+  for (const item of budgetItems) {
+    const cat = item.category || 'other'
+    const amt = item.per_person ? Number(item.amount) * memberCount : Number(item.amount)
+    budgetByCategory[cat] = (budgetByCategory[cat] || 0) + amt
+  }
+  const budgetCategories = Object.entries(budgetByCategory)
+    .map(([cat, total]) => ({
+      category: cat,
+      total,
+      perPerson: Math.round(total / memberCount),
+      config: CATEGORY_CONFIG[cat] || { emoji: '\uD83D\uDCCB', label: cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), order: 99 },
+    }))
+    .sort((a, b) => a.config.order - b.config.order)
+  const budgetTotal = budgetCategories.reduce((sum, c) => sum + c.total, 0)
+  const budgetTotalPerPerson = Math.round(budgetTotal / memberCount)
 
   return (
     <>
@@ -183,7 +342,7 @@ export default async function BrochurePage({
         tagline={tagline}
         coverUrl={coverUrl}
         placeId={firstCourse?.google_place_id ?? null}
-        emoji={firstCourse?.emoji ?? '⛳'}
+        emoji={firstCourse?.emoji ?? '\u26F3'}
         year={year}
       />
 
@@ -253,7 +412,7 @@ export default async function BrochurePage({
               No courses added yet
             </h2>
             <p style={{ fontSize: '15px', color: 'var(--text-light)', fontWeight: 300, lineHeight: 1.7, maxWidth: '420px', margin: '0 auto 28px' }}>
-              Use the Golf Concierge to find courses and add them to your trip — they'll appear here in your brochure.
+              Use the Golf Concierge to find courses and add them to your trip — they&apos;ll appear here in your brochure.
             </p>
           </div>
         </section>
@@ -268,9 +427,143 @@ export default async function BrochurePage({
         ))
       )}
 
+      {/* ── Section: The Tee Sheet ── */}
+      {teeTimes.length > 0 && (
+        <section className="tee-sheet-section" style={{ background: '#fff', padding: '72px 0' }}>
+          <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
+            <h2 style={{
+              fontFamily: 'var(--font-sans)', fontSize: '11px', fontWeight: 700,
+              letterSpacing: '0.2em', textTransform: 'uppercase',
+              color: 'var(--text-light)', marginBottom: '36px',
+            }}>
+              The Tee Sheet
+            </h2>
+
+            {teeSheetDates.map((date, di) => (
+              <div key={date} style={{ marginBottom: di < teeSheetDates.length - 1 ? '32px' : 0 }}>
+                {/* Day header */}
+                <div style={{
+                  fontSize: '18px', fontFamily: 'var(--font-serif)', fontWeight: 600,
+                  color: 'var(--green-deep)', marginBottom: '16px',
+                  paddingBottom: '10px', borderBottom: '1px solid var(--cream-dark)',
+                }}>
+                  {fmtDateFull(date)}
+                </div>
+
+                {/* Tee time rows */}
+                {teeTimesByDate[date].map((tt) => (
+                  <div key={tt.id} style={{ display: 'flex', alignItems: 'baseline', gap: '16px', padding: '8px 0' }}>
+                    <div style={{
+                      fontFamily: 'var(--font-serif)', fontSize: '16px', fontWeight: 600,
+                      color: 'var(--gold)', minWidth: '90px', flexShrink: 0,
+                    }}>
+                      {fmtTime12(tt.tee_time)}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--green-deep)' }}>
+                        {tt.course_name}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: 300, marginTop: '2px' }}>
+                        {[
+                          tt.num_players ? `${tt.num_players} player${tt.num_players !== 1 ? 's' : ''}` : null,
+                          tt.green_fee_per_player ? `$${Number(tt.green_fee_per_player).toLocaleString()}/person` : null,
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── Section: Where We're Staying ── */}
+      {accommodations.length > 0 && (
+        <section className="accommodations-section" style={{ background: 'var(--cream)', padding: '72px 0' }}>
+          <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
+            <h2 style={{
+              fontFamily: 'var(--font-sans)', fontSize: '11px', fontWeight: 700,
+              letterSpacing: '0.2em', textTransform: 'uppercase',
+              color: 'var(--text-light)', marginBottom: '36px',
+            }}>
+              Where We&apos;re Staying
+            </h2>
+
+            {accommodations.map((acc, ai) => {
+              const nights = nightsBetween(acc.check_in_date, acc.check_out_date)
+              return (
+                <div key={acc.id}>
+                  {ai > 0 && (
+                    <div style={{ borderTop: '1px solid var(--cream-dark)', margin: '32px 0' }} />
+                  )}
+                  <div>
+                    {/* Property name */}
+                    <h3 style={{
+                      fontFamily: 'var(--font-serif)', fontSize: '26px', fontWeight: 700,
+                      color: 'var(--green-deep)', marginBottom: '6px', lineHeight: 1.2,
+                    }}>
+                      {acc.name}
+                    </h3>
+
+                    {/* Address in small caps */}
+                    {acc.address && (
+                      <div style={{
+                        fontSize: '12px', fontWeight: 500, letterSpacing: '0.08em',
+                        textTransform: 'uppercase', color: 'var(--text-light)', marginBottom: '20px',
+                      }}>
+                        {acc.address}
+                      </div>
+                    )}
+
+                    {/* Check-in / Check-out / Nights */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0', marginBottom: '16px' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-light)', marginBottom: '4px', fontFamily: 'var(--font-sans)' }}>
+                          Check-in
+                        </div>
+                        <div style={{ fontSize: '15px', color: 'var(--green-deep)', fontWeight: 500 }}>
+                          {fmtDateShort(acc.check_in_date)}
+                          {acc.check_in_time ? ` · ${fmtTimePretty(acc.check_in_time)}` : ''}
+                        </div>
+                      </div>
+                      <div style={{
+                        padding: '6px 16px', textAlign: 'center',
+                        fontSize: '14px', fontWeight: 600, color: 'var(--green-deep)',
+                      }}>
+                        {nights} night{nights !== 1 ? 's' : ''}
+                      </div>
+                      <div style={{ flex: 1, textAlign: 'right' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-light)', marginBottom: '4px', fontFamily: 'var(--font-sans)' }}>
+                          Check-out
+                        </div>
+                        <div style={{ fontSize: '15px', color: 'var(--green-deep)', fontWeight: 500 }}>
+                          {fmtDateShort(acc.check_out_date)}
+                          {acc.check_out_time ? ` · ${fmtTimePretty(acc.check_out_time)}` : ''}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Notes */}
+                    {acc.notes && (
+                      <div style={{
+                        fontFamily: 'var(--font-serif)', fontStyle: 'italic',
+                        fontSize: '14px', color: 'var(--text-mid)', lineHeight: 1.6,
+                      }}>
+                        {acc.notes}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
       {/* ── Section 4: Organizer Notes ── */}
       {hasNotes && (
-        <section style={{ background: 'var(--cream)', padding: '72px 0' }}>
+        <section style={{ background: teeTimes.length > 0 || accommodations.length > 0 ? '#fff' : 'var(--cream)', padding: '72px 0' }}>
           <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
             <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '32px', color: 'var(--green-deep)', fontWeight: 700, marginBottom: '36px' }}>
               A Note from {organizerName}
@@ -297,7 +590,79 @@ export default async function BrochurePage({
         </section>
       )}
 
-      {/* ── Section 5: Footer ── */}
+      {/* ── Section: What It'll Cost ── */}
+      {budgetItems.length > 0 && (
+        <section className="budget-section" style={{ background: 'var(--cream)', padding: '72px 0' }}>
+          <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
+            <h2 style={{
+              fontFamily: 'var(--font-sans)', fontSize: '11px', fontWeight: 700,
+              letterSpacing: '0.2em', textTransform: 'uppercase',
+              color: 'var(--text-light)', marginBottom: '36px',
+            }}>
+              What It&apos;ll Cost
+            </h2>
+
+            {/* Header row */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '24px', marginBottom: '12px', paddingRight: '4px' }}>
+              <div style={{ width: '100px', textAlign: 'right', fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-light)', fontFamily: 'var(--font-sans)' }}>
+                Total
+              </div>
+              <div style={{ width: '100px', textAlign: 'right', fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-light)', fontFamily: 'var(--font-sans)' }}>
+                Per Person
+              </div>
+            </div>
+
+            {/* Category rows */}
+            {budgetCategories.map(({ category, total, perPerson, config }) => (
+              <div key={category} style={{
+                display: 'flex', alignItems: 'center', padding: '10px 0',
+                borderBottom: '1px solid rgba(0,0,0,0.06)',
+              }}>
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '16px' }}>{config.emoji}</span>
+                  <span style={{ fontSize: '15px', color: 'var(--green-deep)', fontWeight: 500 }}>
+                    {config.label}
+                  </span>
+                </div>
+                <div style={{ width: '100px', textAlign: 'right', fontSize: '15px', color: 'var(--text-dark)', fontWeight: 400 }}>
+                  ${total.toLocaleString()}
+                </div>
+                <div style={{ width: '100px', textAlign: 'right', fontSize: '15px', color: 'var(--text-mid)', fontWeight: 400, marginLeft: '24px' }}>
+                  ${perPerson.toLocaleString()}
+                </div>
+              </div>
+            ))}
+
+            {/* Total row */}
+            <div style={{
+              display: 'flex', alignItems: 'center', padding: '14px 0',
+              borderTop: '2px solid var(--green-deep)', marginTop: '8px',
+            }}>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontSize: '15px', color: 'var(--green-deep)', fontWeight: 700, letterSpacing: '0.04em' }}>
+                  ESTIMATED TOTAL
+                </span>
+              </div>
+              <div style={{ width: '100px', textAlign: 'right', fontSize: '16px', color: 'var(--green-deep)', fontWeight: 700 }}>
+                ${budgetTotal.toLocaleString()}
+              </div>
+              <div style={{ width: '100px', textAlign: 'right', fontSize: '16px', color: 'var(--green-deep)', fontWeight: 700, marginLeft: '24px' }}>
+                ${budgetTotalPerPerson.toLocaleString()}
+              </div>
+            </div>
+
+            {/* Disclaimer */}
+            <p style={{
+              fontSize: '12px', color: 'var(--text-light)', fontStyle: 'italic',
+              marginTop: '20px', fontWeight: 300,
+            }}>
+              Costs are estimates and subject to change.
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* ── Section: Footer ── */}
       <footer style={{ background: 'var(--green-deep)', padding: '56px 48px', textAlign: 'center' }}>
         <div style={{ fontFamily: 'var(--font-serif)', fontSize: '28px', color: 'var(--gold-light)', fontWeight: 600, marginBottom: '8px' }}>
           Planned with Greenlit
@@ -322,6 +687,9 @@ export default async function BrochurePage({
           body { margin: 0; }
           @page { margin: 0; }
           img { max-width: 100%; }
+          .tee-sheet-section { page-break-before: always; }
+          .budget-section { page-break-before: always; }
+          .photo-strip { grid-template-columns: repeat(2, 1fr) !important; }
         }
       `}</style>
       <script dangerouslySetInnerHTML={{ __html: `

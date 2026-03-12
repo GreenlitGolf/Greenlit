@@ -40,27 +40,51 @@ interface Props {
 
 const GOLD = 'var(--gold)'
 
+// Tag color map for placeholders
+const TAG_COLORS: Record<string, string> = {
+  'links':         '#2d6a4f',
+  'resort':        '#1b4332',
+  'public':        '#40916c',
+  'private':       '#2d3436',
+  'top 100':       '#c4a84f',
+  'bucket list':   '#b08d3a',
+  'parkland':      '#52796f',
+  'heathland':     '#5f7464',
+  'championship':  '#1a3c34',
+  'coastal':       '#3a86a8',
+  'desert':        '#c68b59',
+  'mountain':      '#4a6741',
+}
+
+function getTagColor(tags: string[]): string {
+  for (const tag of tags) {
+    const color = TAG_COLORS[tag.toLowerCase()]
+    if (color) return color
+  }
+  return '#2d4a2d' // default green
+}
+
 // First paragraph, truncated to maxWords
 function firstParaTruncated(text: string | null, maxWords = 150): { short: string; full: string; truncated: boolean } {
   if (!text) return { short: '', full: '', truncated: false }
   const firstPara = text.split('\n\n')[0].trim()
   const words = firstPara.split(/\s+/)
   if (words.length <= maxWords) return { short: firstPara, full: text, truncated: false }
-  return { short: words.slice(0, maxWords).join(' ') + '…', full: text, truncated: true }
+  return { short: words.slice(0, maxWords).join(' ') + '\u2026', full: text, truncated: true }
 }
 
 // Best Season: first 120 chars max
 function truncateSeason(text: string | null): string {
   if (!text) return 'Year-round'
   if (text.length <= 120) return text
-  return text.slice(0, 120).trimEnd() + '…'
+  return text.slice(0, 120).trimEnd() + '\u2026'
 }
 
 // Also on Property phrase: max 60 chars
 function truncatePhrase(desc: string | undefined): string {
   if (!desc) return ''
   if (desc.length <= 60) return desc
-  return desc.slice(0, 60).trimEnd() + '…'
+  return desc.slice(0, 60).trimEnd() + '\u2026'
 }
 
 // Lodging: first 2 sentences
@@ -71,7 +95,7 @@ function twoSentences(text: string | null): string {
 }
 
 export default function BrochureCourseSection({ course, index, isLast }: Props) {
-  const [photo, setPhoto]       = useState<string | null>(null)
+  const [photos, setPhotos]   = useState<string[]>([])
   const [expanded, setExpanded] = useState(false)
   const bg = index % 2 === 0 ? '#fff' : 'var(--cream)'
 
@@ -79,13 +103,17 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
     if (!course.google_place_id) return
     fetch(`/api/course-photos/${course.google_place_id}`)
       .then((r) => r.json())
-      .then((d) => { if (d.photos?.[0]) setPhoto(d.photos[0]) })
+      .then((d) => { if (d.photos?.length) setPhotos(d.photos) })
       .catch(() => {})
   }, [course.google_place_id])
 
+  const heroPhoto = photos[0] || null
+  // Photo strip uses indexes 1, 2, 3 (skip 0 which is the hero)
+  const stripPhotos = photos.slice(1, 4) // up to 3 additional photos
+
   const priceLabel = course.price_min
     ? course.price_max && course.price_max !== course.price_min
-      ? `$${course.price_min}–$${course.price_max}`
+      ? `$${course.price_min}\u2013$${course.price_max}`
       : `From $${course.price_min}`
     : null
 
@@ -102,19 +130,32 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
     (c) => c.name !== course.lodging_on_property
   )
 
+  const tagColor = getTagColor(course.tags)
+  const initial = course.name.charAt(0).toUpperCase()
+
+  // Build photo strip items: fill to 3 with placeholders
+  const photoStripItems: Array<{ type: 'photo'; url: string } | { type: 'placeholder' }> = []
+  for (let i = 0; i < 3; i++) {
+    if (i < stripPhotos.length) {
+      photoStripItems.push({ type: 'photo', url: stripPhotos[i] })
+    } else {
+      photoStripItems.push({ type: 'placeholder' })
+    }
+  }
+
   return (
     <section
       className="page-break"
       style={{ background: bg, paddingBottom: isLast ? 0 : '72px' }}
     >
-      {/* Full-bleed photo — 40vh */}
+      {/* Full-bleed photo — 45vh */}
       <div style={{
-        width: '100%', height: '40vh', minHeight: '220px', overflow: 'hidden', position: 'relative',
-        background: photo ? undefined : 'linear-gradient(135deg, var(--green-mid), var(--green-deep))',
+        width: '100%', height: '45vh', minHeight: '260px', overflow: 'hidden', position: 'relative',
+        background: heroPhoto ? undefined : 'linear-gradient(135deg, var(--green-mid), var(--green-deep))',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        {photo ? (
-          <img src={photo} alt={course.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center' }} />
+        {heroPhoto ? (
+          <img src={heroPhoto} alt={course.name} style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition: 'center' }} />
         ) : (
           <span style={{ fontSize: '80px', opacity: 0.4 }}>{course.emoji}</span>
         )}
@@ -196,11 +237,45 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
                   marginTop: '8px', paddingLeft: '23px', fontFamily: 'var(--font-sans)',
                 }}
               >
-                {expanded ? '← Show less' : 'Read more →'}
+                {expanded ? '\u2190 Show less' : 'Read more \u2192'}
               </button>
             )}
           </div>
         )}
+
+        {/* Photo strip — 3 images (or placeholders) below description */}
+        <div className="photo-strip" style={{
+          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: '8px', marginBottom: '28px', borderRadius: '8px', overflow: 'hidden',
+        }}>
+          {photoStripItems.map((item, i) => (
+            <div key={i} style={{
+              height: '200px', borderRadius: '6px', overflow: 'hidden',
+              position: 'relative',
+            }}>
+              {item.type === 'photo' ? (
+                <img
+                  src={item.url}
+                  alt={`${course.name} photo ${i + 2}`}
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                />
+              ) : (
+                <div style={{
+                  width: '100%', height: '100%',
+                  background: tagColor,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <span style={{
+                    fontFamily: 'var(--font-serif)', fontSize: '48px',
+                    color: 'rgba(255,255,255,0.25)', fontWeight: 700,
+                  }}>
+                    {initial}
+                  </span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
 
         {/* Also on Property — compact, one line each */}
         {onPropertyCourses.length > 0 && (
@@ -216,7 +291,7 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
                     <span style={{ color: GOLD, flexShrink: 0 }}>◆</span>
                     <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       <strong style={{ fontWeight: 600, color: 'var(--green-deep)' }}>{c.name}</strong>
-                      {c.holes ? ` — ${c.holes} holes` : ''}
+                      {c.holes ? ` \u2014 ${c.holes} holes` : ''}
                       {phrase && !phrase.includes('holes') ? ` · ${phrase}` : ''}
                     </span>
                   </div>

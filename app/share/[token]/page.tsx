@@ -13,6 +13,24 @@ type RawItem = {
   type:       string
 }
 
+type TeeTime = {
+  id: string
+  course_name: string
+  tee_date: string
+  tee_time: string
+  num_players: number | null
+  confirmation_number: string | null
+  green_fee_per_player: number | null
+}
+
+type Accommodation = {
+  id: string
+  name: string
+  check_in_date: string
+  check_out_date: string
+  confirmation_number: string | null
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function parseTimeToMinutes(time: string): number {
@@ -29,13 +47,16 @@ function parseTimeToMinutes(time: string): number {
 function getTripDays(start: string | null, end: string | null) {
   const base = start ? new Date(start + 'T12:00:00') : new Date()
   const last = end   ? new Date(end   + 'T12:00:00') : base
-  const days: Array<{ date: Date; dayNum: number }> = []
+  const days: Array<{ date: Date; dayNum: number; dateStr: string }> = []
   const cur = new Date(base); let n = 1
   while (cur <= last) {
-    days.push({ date: new Date(cur), dayNum: n })
+    const yyyy = cur.getFullYear()
+    const mm = String(cur.getMonth() + 1).padStart(2, '0')
+    const dd = String(cur.getDate()).padStart(2, '0')
+    days.push({ date: new Date(cur), dayNum: n, dateStr: `${yyyy}-${mm}-${dd}` })
     cur.setDate(cur.getDate() + 1); n++
   }
-  return days.length ? days : [{ date: base, dayNum: 1 }]
+  return days.length ? days : [{ date: base, dayNum: 1, dateStr: '' }]
 }
 
 function fmtCompact(d: Date) {
@@ -51,6 +72,21 @@ function fmtRange(start: string | null, end: string | null): string {
   if (s.getFullYear() === e.getFullYear())
     return `${mo(s)} – ${mo(e)}, ${s.getFullYear()}`
   return `${mo(s)}, ${s.getFullYear()} – ${mo(e)}, ${e.getFullYear()}`
+}
+
+function fmtTime12(time: string): string {
+  const [hStr, mStr] = time.split(':')
+  let h = parseInt(hStr, 10)
+  const m = parseInt(mStr, 10)
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  if (h > 12) h -= 12
+  if (h === 0) h = 12
+  return `${h}:${m.toString().padStart(2, '0')} ${ampm}`
+}
+
+function fmtDateShort(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00')
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
@@ -72,11 +108,19 @@ export default async function ShareQuickView({
 
   if (!trip) return notFound()
 
-  // Fetch member count, items, customizations in parallel
-  const [{ count: memberCount }, { data: rawItems }, { data: custom }] = await Promise.all([
+  // Fetch member count, items, customizations, tee times, accommodations in parallel
+  const [
+    { count: memberCount },
+    { data: rawItems },
+    { data: custom },
+    { data: teeTimesRaw },
+    { data: accommodationsRaw },
+  ] = await Promise.all([
     supabase.from('trip_members').select('*', { count: 'exact', head: true }).eq('trip_id', trip.id),
     supabase.from('itinerary_items').select('id, day_number, start_time, title, type').eq('trip_id', trip.id),
     supabase.from('trip_report_customizations').select('tagline, day_notes, cover_photo_url').eq('trip_id', trip.id).single(),
+    supabase.from('tee_times').select('id, course_name, tee_date, tee_time, num_players, confirmation_number, green_fee_per_player').eq('trip_id', trip.id).order('tee_date').order('tee_time'),
+    supabase.from('accommodations').select('id, name, check_in_date, check_out_date, confirmation_number').eq('trip_id', trip.id).order('check_in_date'),
   ])
 
   const items: RawItem[] = (rawItems || []).sort((a, b) => {
@@ -86,6 +130,16 @@ export default async function ShareQuickView({
     if (!b.start_time) return -1
     return parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)
   })
+
+  const teeTimes: TeeTime[] = (teeTimesRaw || []) as TeeTime[]
+  const accommodations: Accommodation[] = (accommodationsRaw || []) as Accommodation[]
+
+  // Group tee times by date for quick lookup
+  const teeTimesByDate: Record<string, TeeTime[]> = {}
+  for (const tt of teeTimes) {
+    if (!teeTimesByDate[tt.tee_date]) teeTimesByDate[tt.tee_date] = []
+    teeTimesByDate[tt.tee_date].push(tt)
+  }
 
   const tripDays  = getTripDays(trip.start_date, trip.end_date)
   const dayNotes  = (custom?.day_notes as Record<string, string>) || {}
@@ -175,9 +229,10 @@ export default async function ShareQuickView({
 
           {/* ── Day-by-day ── */}
           <div>
-            {tripDays.map(({ date, dayNum }) => {
+            {tripDays.map(({ date, dayNum, dateStr }) => {
               const dayItems = items.filter((i) => i.day_number === dayNum)
               const dayNote  = dayNotes[String(dayNum)] || null
+              const dayTeeTimes = teeTimesByDate[dateStr] || []
 
               return (
                 <div key={dayNum}>
@@ -215,6 +270,29 @@ export default async function ShareQuickView({
                       )}
                     </div>
 
+                    {/* Tee times for this day — highlighted rows */}
+                    {dayTeeTimes.length > 0 && dayTeeTimes.map((tt) => (
+                      <div key={tt.id} style={{
+                        marginTop: '8px', padding: '8px 12px',
+                        background: 'var(--cream)', borderRadius: '6px',
+                        fontSize: '13px', color: 'var(--green-deep)', fontWeight: 500,
+                        display: 'flex', alignItems: 'center', gap: '6px',
+                      }}>
+                        <span>⛳</span>
+                        <span>{fmtTime12(tt.tee_time)}</span>
+                        <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>·</span>
+                        <span>{tt.course_name}</span>
+                        {tt.confirmation_number && (
+                          <>
+                            <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>·</span>
+                            <span style={{ fontSize: '12px', color: 'var(--text-mid)', fontWeight: 400 }}>
+                              Confirmation: #{tt.confirmation_number}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    ))}
+
                     {/* Day note */}
                     {dayNote && (
                       <div style={{
@@ -232,6 +310,26 @@ export default async function ShareQuickView({
             })}
             <div style={{ borderTop: '1px solid var(--cream-dark)' }} />
           </div>
+
+          {/* ── Accommodations ── */}
+          {accommodations.length > 0 && (
+            <div style={{ marginTop: '28px' }}>
+              {accommodations.map((acc) => (
+                <div key={acc.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '8px',
+                  fontSize: '13px', color: 'var(--green-deep)', fontWeight: 500,
+                  padding: '8px 0',
+                }}>
+                  <span style={{ fontSize: '15px' }}>🏨</span>
+                  <span>{acc.name}</span>
+                  <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>,</span>
+                  <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>
+                    {fmtDateShort(acc.check_in_date)}–{fmtDateShort(acc.check_out_date)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* ── Footer ── */}
           <div style={{ marginTop: '56px', textAlign: 'center', fontSize: '11px', color: 'var(--text-light)', fontWeight: 300, letterSpacing: '0.06em' }}>
