@@ -64,6 +64,13 @@ function getTagColor(tags: string[]): string {
   return '#2d4a2d' // default green
 }
 
+function hexToRgba(hex: string, alpha: number): string {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 // First paragraph, truncated to maxWords
 function firstParaTruncated(text: string | null, maxWords = 150): { short: string; full: string; truncated: boolean } {
   if (!text) return { short: '', full: '', truncated: false }
@@ -262,12 +269,12 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
               ) : (
                 <div style={{
                   width: '100%', height: '100%',
-                  background: tagColor,
+                  background: hexToRgba(tagColor, 0.2),
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   <span style={{
                     fontFamily: 'var(--font-serif)', fontSize: '48px',
-                    color: 'rgba(255,255,255,0.25)', fontWeight: 700,
+                    color: hexToRgba(tagColor, 0.6), fontWeight: 700,
                   }}>
                     {initial}
                   </span>

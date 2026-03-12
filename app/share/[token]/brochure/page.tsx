@@ -131,6 +131,124 @@ function nightsBetween(checkIn: string, checkOut: string): number {
   return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24))
 }
 
+// ─── Tee time grouping helpers ────────────────────────────────────────────────
+
+type TeeTimeGroup = {
+  courseName:      string
+  earliestTime:    string   // "HH:MM:SS"
+  latestTime:      string   // "HH:MM:SS"
+  totalPlayers:    number
+  groupCount:      number
+  feePerPlayer:    number | null
+  teeTimeIds:      string[]
+}
+
+/** Convert "HH:MM:SS" to minutes since midnight */
+function hhmmToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number)
+  return h * 60 + m
+}
+
+/**
+ * Group tee times on the same date + course that are within 30 min of each other.
+ * Input must be sorted by tee_time ascending (which the DB query already does).
+ */
+function groupTeeTimesList(tts: TeeTime[]): TeeTimeGroup[] {
+  const groups: TeeTimeGroup[] = []
+  let i = 0
+  while (i < tts.length) {
+    const anchor = tts[i]
+    const batch = [anchor]
+    let j = i + 1
+    while (
+      j < tts.length &&
+      tts[j].course_name === anchor.course_name &&
+      hhmmToMinutes(tts[j].tee_time) - hhmmToMinutes(anchor.tee_time) <= 30
+    ) {
+      batch.push(tts[j])
+      j++
+    }
+    groups.push({
+      courseName:   anchor.course_name,
+      earliestTime: anchor.tee_time,
+      latestTime:   batch[batch.length - 1].tee_time,
+      totalPlayers: batch.reduce((s, t) => s + (t.num_players ?? 0), 0),
+      groupCount:   batch.length,
+      feePerPlayer: anchor.green_fee_per_player ? Number(anchor.green_fee_per_player) : null,
+      teeTimeIds:   batch.map((t) => t.id),
+    })
+    i = j
+  }
+  return groups
+}
+
+/** Format a time range: "8:47 – 9:10 AM" or "8:47 AM" if single */
+function fmtTimeRange(earliest: string, latest: string): string {
+  const e = fmtTime12(earliest)
+  if (earliest === latest) return e
+  const l = fmtTime12(latest)
+  // If same AM/PM suffix, drop it from the first time
+  const eSuffix = e.slice(-2)
+  const lSuffix = l.slice(-2)
+  if (eSuffix === lSuffix) {
+    return `${e.slice(0, -3)} – ${l}`
+  }
+  return `${e} – ${l}`
+}
+
+// Display-item types for day-by-day rendering (Fix 2)
+type DisplayItem =
+  | { kind: 'regular'; id: string; start_time: string | null; title: string; type: string }
+  | { kind: 'grouped_tee'; key: string; earliestTime: string; courseName: string; groupCount: number; playersPerGroup: number }
+
+/**
+ * Process sorted dayItems into display items, collapsing adjacent tee_time items
+ * for the same course within 30 min into a single grouped row.
+ */
+function buildDisplayItems(
+  dayItems: Array<{ id: string; start_time: string | null; title: string; type: string; course_id: string | null }>,
+): DisplayItem[] {
+  const result: DisplayItem[] = []
+  let i = 0
+  while (i < dayItems.length) {
+    const item = dayItems[i]
+    if (item.type !== 'tee_time' || !item.start_time) {
+      result.push({ kind: 'regular', ...item })
+      i++
+      continue
+    }
+    // Collect consecutive tee_time items for same course within 30 min
+    const batch = [item]
+    let j = i + 1
+    while (j < dayItems.length) {
+      const next = dayItems[j]
+      if (
+        next.type === 'tee_time' &&
+        next.course_id === item.course_id &&
+        next.start_time &&
+        parseTimeToMinutes(next.start_time) - parseTimeToMinutes(item.start_time) <= 30
+      ) {
+        batch.push(next)
+        j++
+      } else break
+    }
+    if (batch.length === 1) {
+      result.push({ kind: 'regular', ...item })
+    } else {
+      result.push({
+        kind: 'grouped_tee',
+        key: `grp-${item.id}`,
+        earliestTime: item.start_time,
+        courseName: item.title,
+        groupCount: batch.length,
+        playersPerGroup: 4, // standard foursome
+      })
+    }
+    i = j
+  }
+  return result
+}
+
 // Category config for budget display
 const CATEGORY_CONFIG: Record<string, { emoji: string; label: string; order: number }> = {
   green_fees:    { emoji: '\u26F3', label: 'Green Fees',    order: 1 },
@@ -240,7 +358,9 @@ export default async function BrochurePage({
   const year         = trip.start_date ? new Date(trip.start_date + 'T12:00:00').getFullYear() : new Date().getFullYear()
 
   // ── Dynamic stats ────────────────────────────────────────────────────────
-  const totalRounds = teeTimes.length > 0 ? teeTimes.length : orderedCourses.length
+  const daysOfGolf = teeTimes.length > 0
+    ? new Set(teeTimes.map((t) => t.tee_date)).size
+    : orderedCourses.length
 
   // Green fees: use lowest single tee time fee, or fall back to budget_items green_fees / member count
   let estFeesValue = ''
@@ -268,7 +388,7 @@ export default async function BrochurePage({
     { icon: '\u26F3',        label: 'Courses',       value: `${orderedCourses.length} course${orderedCourses.length !== 1 ? 's' : ''}` },
     { icon: '\uD83D\uDC65',  label: 'Golfers',       value: `${memberCount} golfer${memberCount !== 1 ? 's' : ''}` },
     { icon: '\uD83D\uDCCD',  label: 'Destination',   value: trip.destination || 'TBD' },
-    { icon: '\uD83C\uDFCC\uFE0F', label: 'Total Rounds', value: `${totalRounds} round${totalRounds !== 1 ? 's' : ''}` },
+    { icon: '\uD83C\uDFCC\uFE0F', label: 'Days of Golf', value: `${daysOfGolf} day${daysOfGolf !== 1 ? 's' : ''}` },
     { icon: '\uD83D\uDCB0',  label: 'Est. Green Fees', value: estFeesValue },
   ]
 
@@ -371,24 +491,66 @@ export default async function BrochurePage({
           <div>
             {tripDays.map(({ date, dayNum }) => {
               const dayItems = items.filter((i) => i.day_number === dayNum)
+              const displayItems = buildDisplayItems(dayItems)
               const dayNote  = dayNotes[String(dayNum)] || null
               return (
                 <div key={dayNum}>
                   <div style={{ padding: '14px 0', borderTop: '1px solid var(--cream-dark)' }}>
-                    <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--green-deep)', marginBottom: '6px', fontFamily: 'var(--font-sans)' }}>
+                    <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--green-deep)', marginBottom: '10px', fontFamily: 'var(--font-sans)' }}>
                       Day {dayNum} — {fmtCompact(date)}
                     </div>
-                    <div style={{ fontSize: '13px', color: 'var(--text-dark)', lineHeight: 1.9, fontWeight: 300 }}>
-                      {dayItems.length > 0 ? dayItems.map((item, idx) => (
-                        <span key={item.id}>
-                          {idx > 0 && <span style={{ color: 'var(--cream-dark)', margin: '0 8px' }}>·</span>}
-                          {item.start_time && <span style={{ color: 'var(--text-light)', marginRight: '4px', fontSize: '12px' }}>{item.start_time}</span>}
-                          {item.type === 'tee_time'
-                            ? <strong style={{ fontWeight: 600, color: 'var(--green-deep)' }}>{item.title}</strong>
-                            : <span>{item.title}</span>}
-                        </span>
-                      )) : <span style={{ color: 'var(--text-light)', fontStyle: 'italic' }}>No items planned yet.</span>}
-                    </div>
+
+                    {/* Stacked item rows */}
+                    {displayItems.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {displayItems.map((di) => di.kind === 'grouped_tee' ? (
+                          <div key={di.key} style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
+                            <div style={{
+                              width: '80px', flexShrink: 0, fontSize: '13px',
+                              fontFamily: 'var(--font-serif)', fontWeight: 600, color: 'var(--gold)',
+                            }}>
+                              {di.earliestTime}
+                            </div>
+                            <div style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+                              <strong style={{ fontSize: '13px', fontWeight: 600, color: 'var(--green-deep)' }}>
+                                {di.courseName}
+                              </strong>
+                              <span style={{ fontSize: '12px', color: 'var(--text-mid)' }}>⛳</span>
+                              <span style={{
+                                fontSize: '11px', color: 'var(--text-light)', fontWeight: 400,
+                                padding: '1px 8px', background: 'var(--cream)', borderRadius: '10px',
+                              }}>
+                                {di.groupCount} groups of {di.playersPerGroup}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div key={di.id} style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
+                            <div style={{
+                              width: '80px', flexShrink: 0, fontSize: '13px',
+                              fontFamily: 'var(--font-serif)', fontWeight: 600, color: 'var(--gold)',
+                            }}>
+                              {di.start_time || ''}
+                            </div>
+                            <div style={{ flex: 1 }}>
+                              {di.type === 'tee_time' ? (
+                                <span style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'baseline', gap: '6px' }}>
+                                  <strong style={{ fontWeight: 600, color: 'var(--green-deep)' }}>{di.title}</strong>
+                                  <span style={{ fontSize: '12px', color: 'var(--text-mid)' }}>⛳</span>
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '13px', fontWeight: 300, color: 'var(--text-dark)' }}>{di.title}</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '13px', color: 'var(--text-light)', fontStyle: 'italic' }}>
+                        No items planned yet.
+                      </div>
+                    )}
+
                     {dayNote && (
                       <div style={{ marginTop: '7px', paddingLeft: '12px', borderLeft: '2px solid var(--gold)', fontFamily: 'var(--font-serif)', fontStyle: 'italic', color: 'var(--gold)', fontSize: '13px' }}>
                         {dayNote}
@@ -439,41 +601,45 @@ export default async function BrochurePage({
               The Tee Sheet
             </h2>
 
-            {teeSheetDates.map((date, di) => (
-              <div key={date} style={{ marginBottom: di < teeSheetDates.length - 1 ? '32px' : 0 }}>
-                {/* Day header */}
-                <div style={{
-                  fontSize: '18px', fontFamily: 'var(--font-serif)', fontWeight: 600,
-                  color: 'var(--green-deep)', marginBottom: '16px',
-                  paddingBottom: '10px', borderBottom: '1px solid var(--cream-dark)',
-                }}>
-                  {fmtDateFull(date)}
-                </div>
-
-                {/* Tee time rows */}
-                {teeTimesByDate[date].map((tt) => (
-                  <div key={tt.id} style={{ display: 'flex', alignItems: 'baseline', gap: '16px', padding: '8px 0' }}>
-                    <div style={{
-                      fontFamily: 'var(--font-serif)', fontSize: '16px', fontWeight: 600,
-                      color: 'var(--gold)', minWidth: '90px', flexShrink: 0,
-                    }}>
-                      {fmtTime12(tt.tee_time)}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--green-deep)' }}>
-                        {tt.course_name}
-                      </div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: 300, marginTop: '2px' }}>
-                        {[
-                          tt.num_players ? `${tt.num_players} player${tt.num_players !== 1 ? 's' : ''}` : null,
-                          tt.green_fee_per_player ? `$${Number(tt.green_fee_per_player).toLocaleString()}/person` : null,
-                        ].filter(Boolean).join(' · ')}
-                      </div>
-                    </div>
+            {teeSheetDates.map((date, di) => {
+              const groups = groupTeeTimesList(teeTimesByDate[date])
+              return (
+                <div key={date} style={{ marginBottom: di < teeSheetDates.length - 1 ? '32px' : 0 }}>
+                  {/* Day header */}
+                  <div style={{
+                    fontSize: '18px', fontFamily: 'var(--font-serif)', fontWeight: 600,
+                    color: 'var(--green-deep)', marginBottom: '16px',
+                    paddingBottom: '10px', borderBottom: '1px solid var(--cream-dark)',
+                  }}>
+                    {fmtDateFull(date)}
                   </div>
-                ))}
-              </div>
-            ))}
+
+                  {/* Grouped tee time rows */}
+                  {groups.map((g, gi) => (
+                    <div key={gi} style={{ display: 'flex', alignItems: 'baseline', gap: '16px', padding: '8px 0' }}>
+                      <div style={{
+                        fontFamily: 'var(--font-serif)', fontSize: '16px', fontWeight: 600,
+                        color: 'var(--gold)', minWidth: '130px', flexShrink: 0,
+                      }}>
+                        {fmtTimeRange(g.earliestTime, g.latestTime)}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--green-deep)' }}>
+                          {g.courseName}
+                        </div>
+                        <div style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: 300, marginTop: '2px' }}>
+                          {[
+                            g.totalPlayers > 0 ? `${g.totalPlayers} player${g.totalPlayers !== 1 ? 's' : ''}` : null,
+                            g.groupCount > 1 ? `${g.groupCount} groups` : null,
+                            g.feePerPlayer ? `$${g.feePerPlayer.toFixed(2)}/person` : null,
+                          ].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            })}
           </div>
         </section>
       )}
@@ -569,15 +735,20 @@ export default async function BrochurePage({
               A Note from {organizerName}
             </h2>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              {tripDays.map(({ dayNum }) => {
+              {tripDays.map(({ date, dayNum }) => {
                 const note = dayNotes[String(dayNum)]
                 if (!note?.trim()) return null
+                const dayLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()
                 return (
-                  <div key={dayNum} style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-                    <div style={{ flexShrink: 0, paddingTop: '4px' }}>
-                      <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-light)', fontFamily: 'var(--font-sans)' }}>Day {dayNum}</div>
+                  <div key={dayNum}>
+                    <div style={{
+                      fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em',
+                      textTransform: 'uppercase', color: 'var(--green-deep)',
+                      fontFamily: 'var(--font-sans)', marginBottom: '10px',
+                    }}>
+                      Day {dayNum} — {dayLabel}
                     </div>
-                    <div style={{ borderLeft: '3px solid var(--gold)', paddingLeft: '20px', flex: 1 }}>
+                    <div style={{ borderLeft: '3px solid var(--gold)', paddingLeft: '20px' }}>
                       <p style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '18px', color: 'var(--green-deep)', lineHeight: 1.7, margin: 0, fontWeight: 400 }}>
                         {note}
                       </p>
