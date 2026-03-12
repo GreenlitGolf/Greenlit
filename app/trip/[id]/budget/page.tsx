@@ -911,7 +911,7 @@ export default function BudgetPage() {
     ])
 
     if (tripRes.data)    setTrip(tripRes.data)
-    if (membersRes.data) setMembers(membersRes.data as Member[])
+    if (membersRes.data) setMembers(membersRes.data as unknown as Member[])
     if (itemsRes.data)   setItems(itemsRes.data as BudgetItem[])
     if (ttRes.data)      setTeeTimes(ttRes.data as TeeTime[])
     if (accRes.data)     setAccs(accRes.data as Acc[])
