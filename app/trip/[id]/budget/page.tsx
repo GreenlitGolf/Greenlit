@@ -107,8 +107,9 @@ function buildNavItems(memberCount: number): NavItem[] {
   return [
     { id: 'concierge', icon: '✦',  label: 'Golf Concierge',  href: '' },
     { id: 'itinerary', icon: '📅', label: 'Trip Itinerary',  href: '' },
-    { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
+    { id: 'games',     icon: '🎲', label: 'Golf Games',      href: '' },
     { id: 'teetimes',  icon: '🕐', label: 'Tee Times',       href: '' },
+    { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
     { id: 'hotels',    icon: '🏨', label: 'Accommodations',  href: '' },
     { id: 'group',     icon: '👥', label: 'Group & Members', href: '', badge: memberCount > 0 ? memberCount : undefined },
     { id: 'budget',    icon: '💰', label: 'Budget Tracker',  href: '' },
@@ -201,6 +202,7 @@ function SourceBadge({ sourceType }: { sourceType: string | null }) {
     tee_time:      { label: 'from Tee Times',      color: '#065f46', bg: '#d1fae5' },
     accommodation: { label: 'from Accommodations', color: '#1e40af', bg: '#dbeafe' },
     golf_game:     { label: 'from Golf Game',      color: '#6d28d9', bg: '#ede9fe' },
+    game_payout:   { label: 'from Golf Games',     color: '#6d28d9', bg: '#ede9fe' },
   }
   const s = styles[sourceType] ?? { label: sourceType, color: '#374151', bg: '#f3f4f6' }
   return (
@@ -1148,6 +1150,7 @@ export default function BudgetPage() {
 
   function handleNav(navId: string) {
     if (navId === 'budget')   return
+    if (navId === 'games')    { router.push(`/trip/${id}/games`);          return }
     if (navId === 'report')   { router.push(`/trip/${id}/report`);         return }
     if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);      return }
     if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }

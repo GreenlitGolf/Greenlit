@@ -123,8 +123,9 @@ function buildNavItems(memberCount: number): NavItem[] {
   return [
     { id: 'concierge', icon: '✦',  label: 'Golf Concierge',  href: '' },
     { id: 'itinerary', icon: '📅', label: 'Trip Itinerary',  href: '' },
-    { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
+    { id: 'games',     icon: '🎲', label: 'Golf Games',      href: '' },
     { id: 'teetimes',  icon: '🕐', label: 'Tee Times',       href: '' },
+    { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
     { id: 'hotels',    icon: '🏨', label: 'Accommodations',  href: '' },
     { id: 'group',     icon: '👥', label: 'Group & Members', href: '', badge: memberCount > 0 ? memberCount : undefined },
     { id: 'budget',    icon: '💰', label: 'Budget Tracker',  href: '' },
@@ -918,7 +919,10 @@ export default function TeeTimesPage() {
 
   function handleNav(navId: string) {
     if (navId === 'teetimes') return
-    if (navId === 'report')   { router.push(`/trip/${id}/report`);    return }
+    if (navId === 'games')    { router.push(`/trip/${id}/games`);          return }
+    if (navId === 'report')   { router.push(`/trip/${id}/report`);         return }
+    if (navId === 'budget')   { router.push(`/trip/${id}/budget`);         return }
+    if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }
     router.push(`/trip/${id}`)
   }
 
