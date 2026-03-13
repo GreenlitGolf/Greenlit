@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter }                         from 'next/navigation'
 import { supabase }                          from '@/lib/supabase'
 import { useAuth }                           from '@/context/AuthContext'
@@ -86,8 +86,9 @@ export default function AdminCoursesPage() {
   const [filter,        setFilter]        = useState<FilterTab>('all')
   const [loading,       setLoading]       = useState(true)
   const [running,       setRunning]       = useState(false)
-  const [run10,         setRun10]         = useState<{ active: boolean; done: number; countdown: number }>({ active: false, done: 0, countdown: 0 })
+  const [multiProgress, setMultiProgress] = useState<{ current: number; total: number } | null>(null)
   const [lastResult,    setLastResult]    = useState<RunResult | null>(null)
+  const stopRequested                     = useRef(false)
   const [reenriching,   setReenriching]   = useState<Set<string>>(new Set())
   const [resetLoading,  setResetLoading]  = useState(false)
   const [deepResearch,  setDeepResearch]  = useState(false)
@@ -226,32 +227,45 @@ export default function AdminCoursesPage() {
   }
 
   async function handleRun10() {
-    // 65s ensures the full 60s rate-limit window resets even if a call used ~28k tokens
-    const RATE_LIMIT_DELAY = 65
-    setRun10({ active: true, done: 0, countdown: 0 })
+    stopRequested.current = false
+    setMultiProgress({ current: 0, total: 10 })
     setLastResult(null)
     let lastRes: RunResult | null = null
 
     for (let i = 0; i < 10; i++) {
-      lastRes = await runOne()
-      setRun10({ active: true, done: i + 1, countdown: 0 })
+      // Check stop flag before each call
+      if (stopRequested.current) {
+        lastRes = { status: 'info', message: `Stopped after ${i} of 10` } as RunResult
+        break
+      }
 
-      if (lastRes?.status === 'failed' || lastRes?.message === 'Queue empty') break
+      setMultiProgress({ current: i + 1, total: 10 })
 
-      // Stop immediately on rate limit — course was reset to pending, user can retry later
+      try {
+        lastRes = await runOne()
+      } catch (err) {
+        console.error(`Run ${i + 1} failed:`, err)
+        // Continue to next rather than stopping entirely
+        continue
+      }
+
+      if (lastRes?.message === 'Queue empty') break
       if (lastRes?.status === 'rate_limited') break
 
+      // Small delay between calls to avoid hammering the API
       if (i < 9) {
-        for (let s = RATE_LIMIT_DELAY; s > 0; s--) {
-          setRun10({ active: true, done: i + 1, countdown: s })
-          await new Promise((r) => setTimeout(r, 1000))
-        }
+        await new Promise((r) => setTimeout(r, 500))
       }
     }
 
     setLastResult(lastRes)
-    setRun10({ active: false, done: 0, countdown: 0 })
+    setMultiProgress(null)
+    stopRequested.current = false
     await loadData()
+  }
+
+  function handleStopBatch() {
+    stopRequested.current = true
   }
 
   // ── Render ──────────────────────────────────────────────────
@@ -324,7 +338,7 @@ export default function AdminCoursesPage() {
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
           <button
             onClick={handleRunOne}
-            disabled={running || run10.active}
+            disabled={running || !!multiProgress}
             style={{
               padding      : '10px 20px',
               borderRadius : 'var(--radius-sm)',
@@ -342,33 +356,50 @@ export default function AdminCoursesPage() {
             {running ? '⏳ Running…' : '▶ Run Next Enrichment'}
           </button>
 
-          <button
-            onClick={handleRun10}
-            disabled={running || run10.active}
-            style={{
-              padding      : '10px 20px',
-              borderRadius : 'var(--radius-sm)',
-              background   : run10.active ? 'var(--green-muted)' : 'var(--gold)',
-              color        : run10.active ? 'var(--gold-light)' : 'var(--green-deep)',
-              border       : 'none',
-              fontSize     : '13px',
-              fontWeight   : 600,
-              cursor       : run10.active ? 'not-allowed' : 'pointer',
-              letterSpacing: '0.05em',
-              fontFamily   : 'var(--font-sans)',
-              transition   : 'background 0.2s',
-            }}
-          >
-            {run10.active
-              ? run10.countdown > 0
-                ? `⏸ Waiting ${run10.countdown}s… (${run10.done}/10 done)`
-                : `⏳ Processing ${run10.done + 1}/10…`
-              : '⚡ Run 10 Now'}
-          </button>
+          {multiProgress ? (
+            <button
+              onClick={handleStopBatch}
+              style={{
+                padding      : '10px 20px',
+                borderRadius : 'var(--radius-sm)',
+                background   : '#d97070',
+                color        : '#fff',
+                border       : 'none',
+                fontSize     : '13px',
+                fontWeight   : 600,
+                cursor       : 'pointer',
+                letterSpacing: '0.05em',
+                fontFamily   : 'var(--font-sans)',
+                transition   : 'background 0.2s',
+              }}
+            >
+              ■ Stop ({multiProgress.current}/{multiProgress.total})
+            </button>
+          ) : (
+            <button
+              onClick={handleRun10}
+              disabled={running}
+              style={{
+                padding      : '10px 20px',
+                borderRadius : 'var(--radius-sm)',
+                background   : 'var(--gold)',
+                color        : 'var(--green-deep)',
+                border       : 'none',
+                fontSize     : '13px',
+                fontWeight   : 600,
+                cursor       : running ? 'not-allowed' : 'pointer',
+                letterSpacing: '0.05em',
+                fontFamily   : 'var(--font-sans)',
+                transition   : 'background 0.2s',
+              }}
+            >
+              ⚡ Run 10 Now
+            </button>
+          )}
 
           <button
             onClick={handleResetMissingPhotos}
-            disabled={running || run10.active || resetLoading}
+            disabled={running || !!multiProgress || resetLoading}
             style={{
               padding      : '10px 20px',
               borderRadius : 'var(--radius-sm)',
@@ -377,10 +408,10 @@ export default function AdminCoursesPage() {
               border       : '1px solid var(--green-deep)',
               fontSize     : '13px',
               fontWeight   : 600,
-              cursor       : (running || run10.active || resetLoading) ? 'not-allowed' : 'pointer',
+              cursor       : (running || !!multiProgress || resetLoading) ? 'not-allowed' : 'pointer',
               letterSpacing: '0.04em',
               fontFamily   : 'var(--font-sans)',
-              opacity      : (running || run10.active) ? 0.5 : 1,
+              opacity      : (running || !!multiProgress) ? 0.5 : 1,
             }}
           >
             {resetLoading ? '⏳ Resetting…' : '🖼 Reset Missing Photos'}
@@ -453,6 +484,35 @@ export default function AdminCoursesPage() {
             </div>
           </div>
         </div>
+
+        {/* Batch progress */}
+        {multiProgress && (
+          <div style={{
+            background   : 'rgba(45,90,60,0.08)',
+            border       : '1px solid rgba(45,90,60,0.15)',
+            borderRadius : 'var(--radius-sm)',
+            padding      : '14px 16px',
+            fontSize     : '13px',
+            marginBottom : '16px',
+            display      : 'flex',
+            alignItems   : 'center',
+            gap          : '12px',
+          }}>
+            <span style={{
+              display    : 'inline-block',
+              width      : '14px',
+              height     : '14px',
+              border     : '2px solid var(--green-deep)',
+              borderTopColor: 'transparent',
+              borderRadius: '50%',
+              animation  : 'spin 0.8s linear infinite',
+            }} />
+            <span style={{ color: 'var(--green-deep)', fontWeight: 600 }}>
+              Processing {multiProgress.current} of {multiProgress.total}…
+            </span>
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        )}
 
         {/* Last result inline */}
         {lastResult && (
@@ -606,7 +666,7 @@ export default function AdminCoursesPage() {
                     <td style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
                       <button
                         onClick={() => handleReenrich(r)}
-                        disabled={reenriching.has(r.id) || run10.active}
+                        disabled={reenriching.has(r.id) || !!multiProgress}
                         title="Reset to pending so it will be re-enriched"
                         style={{
                           padding      : '4px 10px',
@@ -616,8 +676,8 @@ export default function AdminCoursesPage() {
                           border       : '1px solid currentColor',
                           fontSize     : '11px',
                           fontWeight   : 600,
-                          cursor       : (reenriching.has(r.id) || run10.active) ? 'not-allowed' : 'pointer',
-                          opacity      : run10.active ? 0.4 : 1,
+                          cursor       : (reenriching.has(r.id) || !!multiProgress) ? 'not-allowed' : 'pointer',
+                          opacity      : !!multiProgress ? 0.4 : 1,
                           fontFamily   : 'var(--font-sans)',
                           letterSpacing: '0.03em',
                         }}
