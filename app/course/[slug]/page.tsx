@@ -141,6 +141,18 @@ export default async function CourseDetailPage({
             {backLabel}
           </Link>
           <Link
+            href="/courses"
+            style={{
+              fontSize:       '12px',
+              color:          'rgba(245,240,232,0.6)',
+              textDecoration: 'none',
+              letterSpacing:  '0.04em',
+              fontWeight:     400,
+            }}
+          >
+            Courses
+          </Link>
+          <Link
             href="/trips/new"
             style={{
               padding:        '8px 18px',

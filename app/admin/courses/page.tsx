@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useRouter }                         from 'next/navigation'
+import Link                                  from 'next/link'
 import { supabase }                          from '@/lib/supabase'
 import { useAuth }                           from '@/context/AuthContext'
 
@@ -46,6 +47,10 @@ const STATUS_CONFIG: Record<QueueStatus, { label: string; bg: string; color: str
 }
 
 // ── Helpers ───────────────────────────────────────────────────
+
+function generateSlug(name: string): string {
+  return name.toLowerCase().replace(/['']/g, '').replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+}
 
 function fmt(iso: string | null): string {
   if (!iso) return '—'
@@ -713,6 +718,26 @@ export default function AdminCoursesPage() {
                       >
                         {reenriching.has(r.id) ? '…' : '↺ Re-enrich'}
                       </button>
+                      {r.status === 'complete' && (
+                        <Link
+                          href={`/admin/courses/${generateSlug(r.name)}`}
+                          style={{
+                            display       : 'inline-block',
+                            padding       : '4px 10px',
+                            borderRadius  : 'var(--radius-sm)',
+                            background    : 'transparent',
+                            color         : 'var(--gold)',
+                            border        : '1px solid var(--gold)',
+                            fontSize      : '11px',
+                            fontWeight    : 600,
+                            textDecoration: 'none',
+                            letterSpacing : '0.03em',
+                            marginLeft    : '6px',
+                          }}
+                        >
+                          ✏️ Edit
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 ))}

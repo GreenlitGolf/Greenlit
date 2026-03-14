@@ -258,6 +258,12 @@ export default function DashboardPage() {
             Greenlit
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <Link href="/courses" style={{ fontSize: '12px', color: 'rgba(245,240,232,0.6)', textDecoration: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>
+              Courses
+            </Link>
+            <Link href="/discover" style={{ fontSize: '12px', color: 'rgba(245,240,232,0.6)', textDecoration: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>
+              Concierge
+            </Link>
             <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(196,168,79,0.2)', border: '1px solid var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, color: 'var(--gold-light)' }}>
               {initials}
             </div>
@@ -383,6 +389,29 @@ export default function DashboardPage() {
               ))}
             </div>
           )}
+
+          {/* Browse Courses CTA */}
+          <div style={{ textAlign: 'center', marginTop: '32px' }}>
+            <Link
+              href="/courses"
+              style={{
+                display:        'inline-flex',
+                alignItems:     'center',
+                gap:            '6px',
+                padding:        '10px 20px',
+                borderRadius:   'var(--radius-sm)',
+                border:         '1px solid var(--cream-dark)',
+                background:     'var(--white)',
+                color:          'var(--green-mid)',
+                fontSize:       '12px',
+                fontWeight:     500,
+                letterSpacing:  '0.06em',
+                textDecoration: 'none',
+              }}
+            >
+              ⛳ Browse Courses
+            </Link>
+          </div>
 
         </div>
       </div>
