@@ -62,8 +62,13 @@ function formatPrice(min: number | null, max: number | null) {
   return null
 }
 
-/** Fallback gradient when no photo is available */
-const FALLBACK_GRADIENT = 'radial-gradient(ellipse at 60% 40%, rgba(45,90,60,0.6) 0%, rgba(10,28,10,1) 70%)'
+/** Luxury fallback background — gold crosshatch texture over deep green gradient */
+const FALLBACK_GRADIENT = [
+  'url("data:image/svg+xml,%3Csvg width=\'60\' height=\'60\' viewBox=\'0 0 60 60\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'none\' fill-rule=\'evenodd\'%3E%3Cg fill=\'%23c4a84f\' fill-opacity=\'0.04\'%3E%3Cpath d=\'M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z\'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")',
+  'radial-gradient(ellipse at 70% 30%, rgba(45, 90, 60, 0.4) 0%, transparent 60%)',
+  'radial-gradient(ellipse at 30% 70%, rgba(196, 168, 79, 0.08) 0%, transparent 50%)',
+  'linear-gradient(160deg, rgb(15, 35, 15) 0%, rgb(8, 22, 8) 100%)',
+].join(', ')
 
 /** Fetch a single photo URL from the course-photos API */
 async function fetchPhoto(placeId: string): Promise<string | null> {
@@ -545,16 +550,39 @@ export default function DashboardPage() {
       setTrips(enriched)
       setLoading(false)
 
-      // Fetch hero photo from first trip's first course
+      // Fetch hero photo — fallback chain:
+      // 1. Trip's own courses' google_place_id
+      // 2. Any enriched course in the DB with a google_place_id
       const heroTrip = enriched[0]
       console.log('[Dashboard] Hero trip:', heroTrip?.name, '| Courses:', heroTrip?.courses.map(c => ({ name: c.name, placeId: c.google_place_id })))
       const heroPlaceId = heroTrip?.courses.find((c) => c.google_place_id)?.google_place_id
-      console.log('[Dashboard] Hero placeId:', heroPlaceId ?? 'NONE — no courses have google_place_id')
+
       if (heroPlaceId) {
-        fetchPhoto(heroPlaceId).then((url) => {
-          console.log('[Dashboard] Hero photo result:', url ? 'SUCCESS' : 'FAILED (null)')
-          setHeroPhotoUrl(url)
-        })
+        console.log('[Dashboard] Hero placeId (from trip courses):', heroPlaceId)
+        const url = await fetchPhoto(heroPlaceId)
+        if (url) { setHeroPhotoUrl(url); return }
+        console.log('[Dashboard] Trip course photo failed, trying fallback…')
+      } else {
+        console.log('[Dashboard] No trip courses have google_place_id, trying fallback…')
+      }
+
+      // Fallback: grab a random enriched course photo from the DB
+      const { data: fallbackCourses } = await supabase
+        .from('courses')
+        .select('google_place_id')
+        .not('google_place_id', 'is', null)
+        .not('description', 'is', null)
+        .limit(5)
+      const fallbackIds = (fallbackCourses ?? []).map(c => c.google_place_id).filter(Boolean) as string[]
+      if (fallbackIds.length > 0) {
+        const randomId = fallbackIds[Math.floor(Math.random() * fallbackIds.length)]
+        console.log('[Dashboard] Fallback placeId (random enriched course):', randomId)
+        const url = await fetchPhoto(randomId)
+        if (url) { setHeroPhotoUrl(url) } else {
+          console.warn('[Dashboard] Fallback photo also failed — using gradient')
+        }
+      } else {
+        console.warn('[Dashboard] No enriched courses with google_place_id in DB')
       }
     }
     fetchTrips()
@@ -647,6 +675,29 @@ export default function DashboardPage() {
               transition: 'opacity 0.5s ease',
             }} />
             <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 0%, rgba(10,28,10,0.75) 100%)' }} />
+
+            {/* Ghost text watermark — only when using gradient fallback */}
+            {!heroPhotoUrl && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '20%',
+                  left: '-20px',
+                  fontFamily: 'var(--font-serif)',
+                  fontSize: 'clamp(80px, 12vw, 180px)',
+                  color: 'rgba(196, 168, 79, 0.06)',
+                  letterSpacing: '-0.02em',
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                  userSelect: 'none',
+                  zIndex: 1,
+                  lineHeight: 1,
+                  fontWeight: 600,
+                }}
+              >
+                {upcomingTrip.destination ?? upcomingTrip.name}
+              </div>
+            )}
 
             {/* Content */}
             <div style={{
