@@ -32,6 +32,13 @@ export async function POST(req: NextRequest) {
 
   const db = adminSupabase()
 
+  // ── Reset stuck processing records (older than 2 minutes) ──
+  await db
+    .from('course_queue')
+    .update({ status: 'pending' })
+    .eq('status', 'processing')
+    .lt('updated_at', new Date(Date.now() - 2 * 60 * 1000).toISOString())
+
   // ── Claim the next pending course (priority first) ────────
   const { data: item } = await db
     .from('course_queue')
@@ -46,7 +53,7 @@ export async function POST(req: NextRequest) {
 
   // Mark as processing immediately to prevent double-processing
   await db.from('course_queue')
-    .update({ status: 'processing' })
+    .update({ status: 'processing', updated_at: new Date().toISOString() })
     .eq('id', item.id)
 
   const result = await enrichCourse(

@@ -75,5 +75,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ updated: true, id, priority: !!priority })
   }
 
-  return NextResponse.json({ error: 'Provide ids[], missingPhotos:true, or setPriority:{id,priority}' }, { status: 400 })
+  // ── Mode 4: reset all stuck processing records back to pending ───────────
+  if (body.resetProcessing === true) {
+    const { error, count } = await db
+      .from('course_queue')
+      .update({ status: 'pending', processed_at: null, notes: null })
+      .eq('status', 'processing')
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ reset: count ?? 0 })
+  }
+
+  return NextResponse.json({ error: 'Provide ids[], missingPhotos:true, setPriority:{id,priority}, or resetProcessing:true' }, { status: 400 })
 }

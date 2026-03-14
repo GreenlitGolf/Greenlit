@@ -91,6 +91,7 @@ export default function AdminCoursesPage() {
   const stopRequested                     = useRef(false)
   const [reenriching,   setReenriching]   = useState<Set<string>>(new Set())
   const [resetLoading,  setResetLoading]  = useState(false)
+  const [stuckLoading,  setStuckLoading]  = useState(false)
   const [deepResearch,  setDeepResearch]  = useState(false)
 
   // Initialize deep research toggle from localStorage
@@ -186,6 +187,14 @@ export default function AdminCoursesPage() {
     setLastResult({ status: 'info', message: `Reset ${count} course${count === 1 ? '' : 's'} with missing photos → pending` } as RunResult)
     await loadData()
     setResetLoading(false)
+  }
+
+  async function handleResetStuck() {
+    setStuckLoading(true)
+    const count = await resetQueue({ resetProcessing: true })
+    setLastResult({ status: 'info', message: `Reset ${count} stuck course${count !== 1 ? 's' : ''} → pending` } as RunResult)
+    await loadData()
+    setStuckLoading(false)
   }
 
   // ── Priority toggle ──────────────────────────────────────────
@@ -415,6 +424,26 @@ export default function AdminCoursesPage() {
             }}
           >
             {resetLoading ? '⏳ Resetting…' : '🖼 Reset Missing Photos'}
+          </button>
+
+          <button
+            onClick={handleResetStuck}
+            disabled={running || !!multiProgress || stuckLoading}
+            style={{
+              padding      : '10px 20px',
+              borderRadius : 'var(--radius-sm)',
+              background   : 'transparent',
+              color        : stuckLoading ? 'var(--text-light)' : '#d97070',
+              border       : '1px solid #d97070',
+              fontSize     : '13px',
+              fontWeight   : 600,
+              cursor       : (running || !!multiProgress || stuckLoading) ? 'not-allowed' : 'pointer',
+              letterSpacing: '0.04em',
+              fontFamily   : 'var(--font-sans)',
+              opacity      : (running || !!multiProgress) ? 0.5 : 1,
+            }}
+          >
+            {stuckLoading ? '⏳ Resetting…' : '🔄 Reset Stuck'}
           </button>
 
           <button
