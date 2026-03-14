@@ -243,7 +243,7 @@ export default function CoursesDirectoryPage() {
   const [priceRange,      setPriceRange]      = useState<string | null>(null)
   const [walkingOnly,     setWalkingOnly]     = useState(false)
   const [modalCourse,     setModalCourse]     = useState<Course | null>(null)
-  const debounceRef                           = useRef<ReturnType<typeof setTimeout>>()
+  const debounceRef                           = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   // ── Load courses ──────────────────────────────────────────
   useEffect(() => {
