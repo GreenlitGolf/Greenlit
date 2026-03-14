@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { supabase } from '@/lib/supabase'
@@ -9,17 +9,38 @@ import ProtectedRoute from '@/components/ProtectedRoute'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Trip = {
-  id:           string
-  name:         string
-  destination:  string | null
-  start_date:   string | null
-  end_date:     string | null
-  memberCount:  number   // confirmed members
-  courseCount:  number   // courses added
+type TripCourseInfo = {
+  name: string
+  google_place_id: string | null
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+type Trip = {
+  id:            string
+  name:          string
+  destination:   string | null
+  start_date:    string | null
+  end_date:      string | null
+  share_token:   string | null
+  memberCount:   number
+  courseCount:    number
+  courses:       TripCourseInfo[]
+}
+
+type FeaturedCourse = {
+  id:               string
+  slug:             string
+  name:             string
+  location:         string
+  emoji:            string
+  tagline:          string | null
+  google_place_id:  string | null
+  tags:             string[]
+  price_min:        number | null
+  price_max:        number | null
+  rating:           number | null
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function formatDateRange(start: string | null, end: string | null) {
   if (!start && !end) return 'Dates TBD'
@@ -34,7 +55,25 @@ function getInitials(name: string) {
   return name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
 }
 
-// ─── Trip Progress Indicator ─────────────────────────────────────────────────
+function formatPrice(min: number | null, max: number | null) {
+  if (min != null && max != null) return `$${min}–$${max}`
+  if (min != null) return `From $${min}`
+  if (max != null) return `Up to $${max}`
+  return null
+}
+
+/** Fetch a single photo URL from the course-photos API */
+async function fetchPhoto(placeId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/course-photos/${encodeURIComponent(placeId)}`)
+    const data = await res.json()
+    return data.photos?.[0] ?? null
+  } catch {
+    return null
+  }
+}
+
+// ─── Trip Progress ────────────────────────────────────────────────────────────
 
 function TripProgress({ trip }: { trip: Trip }) {
   const steps = [
@@ -48,49 +87,14 @@ function TripProgress({ trip }: { trip: Trip }) {
 
   return (
     <div style={{ marginTop: '14px' }}>
-      {/* Bar */}
-      <div
-        style={{
-          height:       '3px',
-          background:   'var(--cream-dark)',
-          borderRadius: '99px',
-          overflow:     'hidden',
-          marginBottom: '8px',
-        }}
-      >
-        <div
-          style={{
-            height:       '100%',
-            width:        `${pct}%`,
-            background:   pct === 100
-              ? 'var(--gold)'
-              : 'linear-gradient(90deg, var(--green-mid), var(--green-light))',
-            borderRadius: '99px',
-            transition:   'width 0.4s ease',
-          }}
-        />
+      <div style={{ height: '3px', background: 'rgba(237,229,212,0.5)', borderRadius: '99px', overflow: 'hidden', marginBottom: '8px' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: pct === 100 ? 'var(--gold)' : 'linear-gradient(90deg, var(--green-mid), var(--green-light))', borderRadius: '99px', transition: 'width 0.4s ease' }} />
       </div>
-      {/* Steps */}
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
         {steps.map((step) => (
           <div key={step.label} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px' }}>
-            <div
-              style={{
-                width:        '6px',
-                height:       '6px',
-                borderRadius: '50%',
-                background:   step.done ? 'var(--green-light)' : 'var(--cream-dark)',
-              }}
-            />
-            <span
-              style={{
-                fontSize:      '8px',
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
-                color:         step.done ? 'var(--green-light)' : 'var(--text-light)',
-                fontWeight:    step.done ? 600 : 400,
-              }}
-            >
+            <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: step.done ? 'var(--green-light)' : 'var(--cream-dark)' }} />
+            <span style={{ fontSize: '8px', letterSpacing: '0.05em', textTransform: 'uppercase', color: step.done ? 'var(--green-light)' : 'var(--text-light)', fontWeight: step.done ? 600 : 400 }}>
               {step.label}
             </span>
           </div>
@@ -100,70 +104,195 @@ function TripProgress({ trip }: { trip: Trip }) {
   )
 }
 
-// ─── Trip Card ───────────────────────────────────────────────────────────────
+// ─── Lazy Photo Hook ──────────────────────────────────────────────────────────
 
-function TripCard({ trip }: { trip: Trip }) {
+function useLazyPhoto(placeId: string | null | undefined) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!placeId) return
+    let cancelled = false
+    fetchPhoto(placeId).then((u) => { if (!cancelled) setUrl(u) })
+    return () => { cancelled = true }
+  }, [placeId])
+  return url
+}
+
+// ─── Scroll Strip ─────────────────────────────────────────────────────────────
+
+function ScrollStrip({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [canLeft, setCanLeft] = useState(false)
+  const [canRight, setCanRight] = useState(false)
+
+  const checkScroll = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    setCanLeft(el.scrollLeft > 10)
+    setCanRight(el.scrollLeft < el.scrollWidth - el.clientWidth - 10)
+  }, [])
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    checkScroll()
+    el.addEventListener('scroll', checkScroll, { passive: true })
+    window.addEventListener('resize', checkScroll)
+    return () => { el.removeEventListener('scroll', checkScroll); window.removeEventListener('resize', checkScroll) }
+  }, [checkScroll])
+
+  // Re-check after children render (images load, etc.)
+  useEffect(() => { const t = setTimeout(checkScroll, 200); return () => clearTimeout(t) }, [children, checkScroll])
+
+  const scroll = (dir: 'left' | 'right') => {
+    ref.current?.scrollBy({ left: dir === 'left' ? -400 : 400, behavior: 'smooth' })
+  }
+
+  const arrowStyle = (side: 'left' | 'right'): React.CSSProperties => ({
+    position: 'absolute',
+    top: '50%',
+    [side]: '8px',
+    transform: 'translateY(-50%)',
+    zIndex: 5,
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    background: 'var(--white)',
+    border: '1px solid var(--cream-dark)',
+    boxShadow: 'var(--shadow-subtle)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    fontSize: '16px',
+    color: 'var(--green-deep)',
+    transition: 'opacity 0.2s',
+  })
+
   return (
-    <Link href={`/trip/${trip.id}`} style={{ textDecoration: 'none' }}>
+    <div style={{ position: 'relative' }}>
+      {canLeft && (
+        <button onClick={() => scroll('left')} style={arrowStyle('left')} aria-label="Scroll left">
+          ‹
+        </button>
+      )}
       <div
+        ref={ref}
         style={{
-          background:   'var(--white)',
-          borderRadius: 'var(--radius-lg)',
-          border:       '1px solid var(--cream-dark)',
-          overflow:     'hidden',
-          transition:   'box-shadow 0.2s, transform 0.2s',
-          cursor:       'pointer',
-        }}
-        onMouseEnter={(e) => {
-          const el = e.currentTarget as HTMLDivElement
-          el.style.boxShadow = 'var(--shadow-card)'
-          el.style.transform = 'translateY(-2px)'
-        }}
-        onMouseLeave={(e) => {
-          const el = e.currentTarget as HTMLDivElement
-          el.style.boxShadow = 'none'
-          el.style.transform = 'translateY(0)'
+          display: 'flex',
+          gap: '20px',
+          overflowX: 'auto',
+          scrollSnapType: 'x mandatory',
+          scrollPaddingLeft: '48px',
+          padding: '4px 48px 16px',
+          msOverflowStyle: 'none',
+          scrollbarWidth: 'none',
         }}
       >
-        <div style={{ height: '5px', background: 'linear-gradient(90deg, var(--green-deep), var(--green-light))' }} />
+        {children}
+      </div>
+      {canRight && (
+        <button onClick={() => scroll('right')} style={arrowStyle('right')} aria-label="Scroll right">
+          ›
+        </button>
+      )}
+      <style>{`
+        div::-webkit-scrollbar { display: none; }
+      `}</style>
+    </div>
+  )
+}
 
-        <div style={{ padding: '20px' }}>
-          <div style={{ fontSize: '9px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--green-muted)', marginBottom: '5px', fontWeight: 600 }}>
-            Golf Trip
-          </div>
-          <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', color: 'var(--green-deep)', fontWeight: 600, lineHeight: 1.25, marginBottom: '4px' }}>
+// ─── Fade-In Section ──────────────────────────────────────────────────────────
+
+function FadeInSection({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect() } },
+      { threshold: 0.1 },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        ...style,
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'translateY(0)' : 'translateY(30px)',
+        transition: 'opacity 0.6s ease, transform 0.6s ease',
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+// ─── Trip Card (Rich) ─────────────────────────────────────────────────────────
+
+function RichTripCard({ trip }: { trip: Trip }) {
+  const firstPlaceId = trip.courses.find((c) => c.google_place_id)?.google_place_id
+  const photoUrl = useLazyPhoto(firstPlaceId)
+
+  return (
+    <Link href={`/trip/${trip.id}`} style={{ textDecoration: 'none', flexShrink: 0, scrollSnapAlign: 'start' }}>
+      <div
+        style={{
+          width: '380px',
+          background: 'var(--white)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--cream-dark)',
+          overflow: 'hidden',
+          transition: 'box-shadow 0.2s, transform 0.2s',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={(e) => { const el = e.currentTarget; el.style.boxShadow = 'var(--shadow-card)'; el.style.transform = 'translateY(-3px)' }}
+        onMouseLeave={(e) => { const el = e.currentTarget; el.style.boxShadow = 'none'; el.style.transform = 'translateY(0)' }}
+      >
+        {/* Photo */}
+        <div style={{
+          height: '180px',
+          position: 'relative',
+          background: photoUrl
+            ? `url(${photoUrl}) center/cover no-repeat`
+            : 'linear-gradient(135deg, var(--green-deep), var(--green-mid))',
+        }}>
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 60%)' }} />
+          <div style={{
+            position: 'absolute', bottom: '16px', left: '16px', right: '16px',
+            fontFamily: 'var(--font-serif)', fontSize: '20px', color: '#fff', fontWeight: 600, lineHeight: 1.2,
+            textShadow: '0 1px 4px rgba(0,0,0,0.3)',
+          }}>
             {trip.name}
           </div>
-          <div style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: 300, marginBottom: '8px' }}>
+        </div>
+
+        {/* Details */}
+        <div style={{ padding: '20px' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: 300, marginBottom: '4px' }}>
             📍 {trip.destination ?? 'Destination TBD'}
           </div>
           <div style={{ fontSize: '11px', color: trip.start_date ? 'var(--sand)' : 'var(--text-light)', fontWeight: trip.start_date ? 400 : 300, marginBottom: '12px' }}>
             🗓 {formatDateRange(trip.start_date, trip.end_date)}
           </div>
-
-          {/* Stats row */}
           <div style={{ display: 'flex', gap: '16px', paddingTop: '12px', borderTop: '1px solid var(--cream-dark)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span style={{ fontSize: '12px' }}>👥</span>
-              <span style={{ fontSize: '13px', fontWeight: trip.memberCount > 1 ? 600 : 400, color: trip.memberCount > 1 ? 'var(--green-deep)' : 'var(--text-light)' }}>
-                {trip.memberCount}
-              </span>
-              <span style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 300 }}>
-                {trip.memberCount === 1 ? 'golfer' : 'golfers'}
-              </span>
+              <span style={{ fontSize: '13px', fontWeight: trip.memberCount > 1 ? 600 : 400, color: trip.memberCount > 1 ? 'var(--green-deep)' : 'var(--text-light)' }}>{trip.memberCount}</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 300 }}>{trip.memberCount === 1 ? 'golfer' : 'golfers'}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span style={{ fontSize: '12px' }}>⛳</span>
-              <span style={{ fontSize: '13px', fontWeight: trip.courseCount > 0 ? 600 : 400, color: trip.courseCount > 0 ? 'var(--green-deep)' : 'var(--text-light)' }}>
-                {trip.courseCount}
-              </span>
-              <span style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 300 }}>
-                {trip.courseCount === 1 ? 'course' : 'courses'}
-              </span>
+              <span style={{ fontSize: '13px', fontWeight: trip.courseCount > 0 ? 600 : 400, color: trip.courseCount > 0 ? 'var(--green-deep)' : 'var(--text-light)' }}>{trip.courseCount}</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 300 }}>{trip.courseCount === 1 ? 'course' : 'courses'}</span>
             </div>
           </div>
-
-          {/* Progress */}
           <TripProgress trip={trip} />
         </div>
       </div>
@@ -171,18 +300,152 @@ function TripCard({ trip }: { trip: Trip }) {
   )
 }
 
+// ─── Featured Course Card ─────────────────────────────────────────────────────
+
+function FeaturedCourseCard({ course }: { course: FeaturedCourse }) {
+  const photoUrl = useLazyPhoto(course.google_place_id)
+  const price = formatPrice(course.price_min, course.price_max)
+
+  return (
+    <Link href={`/course/${course.slug}`} style={{ textDecoration: 'none', flexShrink: 0, scrollSnapAlign: 'start' }}>
+      <div
+        style={{
+          width: '280px',
+          background: 'var(--white)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--cream-dark)',
+          overflow: 'hidden',
+          transition: 'box-shadow 0.2s, transform 0.2s',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={(e) => { const el = e.currentTarget; el.style.boxShadow = 'var(--shadow-card)'; el.style.transform = 'translateY(-3px)' }}
+        onMouseLeave={(e) => { const el = e.currentTarget; el.style.boxShadow = 'none'; el.style.transform = 'translateY(0)' }}
+      >
+        <div style={{
+          height: '160px',
+          background: photoUrl
+            ? `url(${photoUrl}) center/cover no-repeat`
+            : 'linear-gradient(135deg, var(--green-deep), var(--green-mid))',
+        }} />
+        <div style={{ padding: '16px' }}>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: '16px', color: 'var(--green-deep)', fontWeight: 600, lineHeight: 1.25, marginBottom: '4px' }}>
+            {course.emoji} {course.name}
+          </div>
+          <div style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 300, marginBottom: '8px' }}>
+            {course.location}
+          </div>
+          {price && (
+            <div style={{ fontSize: '12px', color: 'var(--gold)', fontWeight: 600, marginBottom: '8px' }}>
+              {price}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {(course.tags ?? []).slice(0, 3).map((tag) => (
+              <span key={tag} style={{
+                fontSize: '9px', letterSpacing: '0.06em', textTransform: 'uppercase',
+                padding: '3px 8px', borderRadius: '99px', background: 'var(--cream)',
+                color: 'var(--green-mid)', fontWeight: 500,
+              }}>
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Link>
+  )
+}
+
+// ─── Ken Burns Hero ───────────────────────────────────────────────────────────
+
+function KenBurnsHero({ photos, children }: { photos: string[]; children: React.ReactNode }) {
+  const [index, setIndex] = useState(0)
+
+  useEffect(() => {
+    if (photos.length <= 1) return
+    const interval = setInterval(() => {
+      setIndex((prev) => (prev + 1) % photos.length)
+    }, 6000)
+    return () => clearInterval(interval)
+  }, [photos.length])
+
+  return (
+    <div style={{ position: 'relative', height: 'calc(100vh - 64px)', overflow: 'hidden' }}>
+      {/* Background layers */}
+      {photos.length > 0 ? (
+        photos.map((url, i) => (
+          <div
+            key={url}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              backgroundImage: `url(${url})`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              opacity: i === index ? 1 : 0,
+              transition: 'opacity 1.5s ease-in-out',
+              animation: i === index ? 'kenBurns 6s ease-in-out forwards' : 'none',
+            }}
+          />
+        ))
+      ) : (
+        <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, var(--green-deep), var(--green-mid))' }} />
+      )}
+
+      {/* Overlay */}
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.65) 100%)' }} />
+
+      {/* Content */}
+      <div style={{ position: 'relative', zIndex: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// ─── Quick Access Pill ────────────────────────────────────────────────────────
+
+function QuickPill({ href, label }: { href: string; label: string }) {
+  return (
+    <Link
+      href={href}
+      style={{
+        padding: '6px 14px',
+        borderRadius: '99px',
+        background: 'rgba(255,255,255,0.1)',
+        backdropFilter: 'blur(4px)',
+        color: 'rgba(255,255,255,0.8)',
+        fontSize: '11px',
+        fontWeight: 500,
+        letterSpacing: '0.04em',
+        textDecoration: 'none',
+        transition: 'background 0.2s',
+        whiteSpace: 'nowrap',
+      }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.2)' }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.1)' }}
+    >
+      {label}
+    </Link>
+  )
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { session } = useAuth()
-  const router      = useRouter()
-  const [trips,   setTrips]   = useState<Trip[]>([])
-  const [loading, setLoading] = useState(true)
+  const { session }  = useAuth()
+  const router        = useRouter()
 
-  const userDisplayName =
-    session?.user.user_metadata?.full_name ?? session?.user.email ?? ''
+  const [trips,           setTrips]           = useState<Trip[]>([])
+  const [loading,         setLoading]         = useState(true)
+  const [heroPhotoUrl,    setHeroPhotoUrl]    = useState<string | null>(null)
+  const [featuredCourses, setFeaturedCourses] = useState<FeaturedCourse[]>([])
+  const [kenBurnsPhotos,  setKenBurnsPhotos]  = useState<string[]>([])
+
+  const userDisplayName = session?.user.user_metadata?.full_name ?? session?.user.email ?? ''
   const initials = userDisplayName ? getInitials(userDisplayName) : '?'
 
+  // ── Fetch trips (extended with course data + share_token) ──────────────────
   useEffect(() => {
     async function fetchTrips() {
       if (!session) return
@@ -200,11 +463,11 @@ export default function DashboardPage() {
 
       const tripIds = memberRows.map((r) => r.trip_id)
 
-      // 2. Trips data + member counts + course counts in parallel
-      const [tripsRes, membersRes, coursesRes] = await Promise.all([
+      // 2. Trips + member counts + course counts + trip_courses in parallel
+      const [tripsRes, membersRes, coursesCountRes, tripCoursesRes] = await Promise.all([
         supabase
           .from('trips')
-          .select('id, name, destination, start_date, end_date')
+          .select('id, name, destination, start_date, end_date, share_token')
           .in('id', tripIds),
         supabase
           .from('trip_members')
@@ -214,206 +477,357 @@ export default function DashboardPage() {
           .from('trip_courses')
           .select('trip_id')
           .in('trip_id', tripIds),
+        supabase
+          .from('trip_courses')
+          .select('trip_id, course_id')
+          .in('trip_id', tripIds),
       ])
 
-      const tripData   = tripsRes.data   ?? []
-      const memberData = membersRes.data ?? []
-      const courseData = coursesRes.data ?? []
+      const tripData       = tripsRes.data        ?? []
+      const memberData     = membersRes.data       ?? []
+      const courseCountData = coursesCountRes.data  ?? []
+      const tripCoursesData = tripCoursesRes.data  ?? []
 
-      // 3. Count maps
-      const memberCountMap = memberData.reduce<Record<string, number>>((acc, r) => {
-        acc[r.trip_id] = (acc[r.trip_id] ?? 0) + 1
-        return acc
-      }, {})
-      const courseCountMap = courseData.reduce<Record<string, number>>((acc, r) => {
-        acc[r.trip_id] = (acc[r.trip_id] ?? 0) + 1
-        return acc
-      }, {})
+      // Count maps
+      const memberCountMap = memberData.reduce<Record<string, number>>((acc, r) => { acc[r.trip_id] = (acc[r.trip_id] ?? 0) + 1; return acc }, {})
+      const courseCountMap = courseCountData.reduce<Record<string, number>>((acc, r) => { acc[r.trip_id] = (acc[r.trip_id] ?? 0) + 1; return acc }, {})
 
-      // 4. Combine
+      // Fetch course details (google_place_id, name) for trip courses
+      const allCourseIds = [...new Set(tripCoursesData.map((tc) => tc.course_id).filter(Boolean))] as string[]
+      let courseDetailsMap: Record<string, { name: string; google_place_id: string | null }> = {}
+
+      if (allCourseIds.length > 0) {
+        const { data: courseDetails } = await supabase
+          .from('courses')
+          .select('id, name, google_place_id')
+          .in('id', allCourseIds)
+        ;(courseDetails ?? []).forEach((c) => {
+          courseDetailsMap[c.id] = { name: c.name, google_place_id: c.google_place_id }
+        })
+      }
+
+      // Build trip_courses per trip
+      const tripCourseMap: Record<string, TripCourseInfo[]> = {}
+      tripCoursesData.forEach((tc) => {
+        if (!tripCourseMap[tc.trip_id]) tripCourseMap[tc.trip_id] = []
+        if (tc.course_id && courseDetailsMap[tc.course_id]) {
+          tripCourseMap[tc.trip_id].push(courseDetailsMap[tc.course_id])
+        }
+      })
+
+      // Combine
       const enriched: Trip[] = tripData.map((t) => ({
         ...t,
         memberCount: memberCountMap[t.id] ?? 0,
-        courseCount: courseCountMap[t.id] ?? 0,
+        courseCount:  courseCountMap[t.id]  ?? 0,
+        courses:     tripCourseMap[t.id]   ?? [],
       }))
+
+      // Sort: upcoming first (by start_date), then undated
+      enriched.sort((a, b) => {
+        if (a.start_date && b.start_date) return new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+        if (a.start_date) return -1
+        if (b.start_date) return 1
+        return 0
+      })
 
       setTrips(enriched)
       setLoading(false)
+
+      // Fetch hero photo from first trip's first course
+      const heroPlaceId = enriched[0]?.courses.find((c) => c.google_place_id)?.google_place_id
+      if (heroPlaceId) {
+        fetchPhoto(heroPlaceId).then(setHeroPhotoUrl)
+      }
     }
     fetchTrips()
   }, [session])
+
+  // ── Fetch featured courses ────────────────────────────────────────────────
+  useEffect(() => {
+    fetch('/api/courses/featured')
+      .then((r) => r.json())
+      .then((data) => {
+        const courses = data.courses ?? []
+        setFeaturedCourses(courses)
+
+        // For new-user Ken Burns: fetch photos for first 5 featured courses
+        const placeIds = courses
+          .map((c: FeaturedCourse) => c.google_place_id)
+          .filter(Boolean)
+          .slice(0, 5) as string[]
+
+        if (placeIds.length > 0) {
+          Promise.all(placeIds.map(fetchPhoto)).then((urls) => {
+            setKenBurnsPhotos(urls.filter(Boolean) as string[])
+          })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // ── Determine hero trip ────────────────────────────────────────────────────
+  const today = new Date().toISOString().split('T')[0]
+  const upcomingTrip = trips.find((t) => t.start_date && t.start_date >= today) ?? trips[0]
 
   async function handleLogout() {
     await supabase.auth.signOut()
     router.push('/login')
   }
 
+  const hasTrips = !loading && trips.length > 0
+  const isNewUser = !loading && trips.length === 0
+
   return (
     <ProtectedRoute>
       <div style={{ minHeight: '100vh', background: 'var(--cream)', fontFamily: 'var(--font-sans)' }}>
 
-        {/* Top bar */}
-        <header style={{ background: 'var(--green-deep)', padding: '0 48px', height: '64px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 20 }}>
+        {/* ── Sticky Header ───────────────────────────────────────── */}
+        <header style={{
+          background: 'var(--green-deep)', padding: '0 48px', height: '64px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          position: 'sticky', top: 0, zIndex: 50,
+        }}>
           <div style={{ fontFamily: 'var(--font-serif)', fontSize: '20px', color: 'var(--gold-light)', letterSpacing: '0.02em' }}>
             Greenlit
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <Link href="/courses" style={{ fontSize: '12px', color: 'rgba(245,240,232,0.6)', textDecoration: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>
-              Courses
-            </Link>
-            <Link href="/discover" style={{ fontSize: '12px', color: 'rgba(245,240,232,0.6)', textDecoration: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>
-              Concierge
-            </Link>
-            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(196,168,79,0.2)', border: '1px solid var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, color: 'var(--gold-light)' }}>
-              {initials}
-            </div>
-            <button onClick={handleLogout} style={{ background: 'transparent', border: 'none', fontSize: '12px', color: 'rgba(245,240,232,0.5)', cursor: 'pointer', letterSpacing: '0.05em', fontFamily: 'var(--font-sans)' }}>
-              Log out
-            </button>
+            <Link href="/courses" style={{ fontSize: '12px', color: 'rgba(245,240,232,0.6)', textDecoration: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>Courses</Link>
+            <Link href="/discover" style={{ fontSize: '12px', color: 'rgba(245,240,232,0.6)', textDecoration: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>Concierge</Link>
+            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'rgba(196,168,79,0.2)', border: '1px solid var(--gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 600, color: 'var(--gold-light)' }}>{initials}</div>
+            <button onClick={handleLogout} style={{ background: 'transparent', border: 'none', fontSize: '12px', color: 'rgba(245,240,232,0.5)', cursor: 'pointer', letterSpacing: '0.05em', fontFamily: 'var(--font-sans)' }}>Log out</button>
           </div>
         </header>
 
-        {/* Page header */}
-        <div style={{ padding: '40px 48px 28px', borderBottom: '1px solid var(--cream-dark)', background: 'var(--white)', display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ fontSize: '10px', letterSpacing: '0.25em', textTransform: 'uppercase', color: 'var(--green-light)', fontWeight: 600, marginBottom: '6px' }}>
-              Your Trips
+        {/* ── Loading Skeleton ─────────────────────────────────────── */}
+        {loading && (
+          <>
+            <div style={{ height: 'calc(100vh - 64px)', background: 'var(--green-deep)', position: 'relative', overflow: 'hidden' }}>
+              <div style={{
+                position: 'absolute', inset: 0,
+                background: 'linear-gradient(90deg, rgba(45,74,45,0) 25%, rgba(45,74,45,0.3) 50%, rgba(45,74,45,0) 75%)',
+                backgroundSize: '200% 100%',
+                animation: 'shimmer 2s infinite',
+              }} />
             </div>
-            <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: '30px', color: 'var(--green-deep)', fontWeight: 600 }}>
-              Dashboard
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-light)', marginTop: '4px', fontWeight: 300 }}>
-              {session?.user.email}
-            </p>
+            <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
+          </>
+        )}
+
+        {/* ── Hero: Returning User ────────────────────────────────── */}
+        {hasTrips && upcomingTrip && (
+          <div style={{
+            position: 'relative',
+            height: 'calc(100vh - 64px)',
+            overflow: 'hidden',
+          }}>
+            {/* Background */}
+            <div style={{
+              position: 'absolute', inset: 0,
+              background: heroPhotoUrl
+                ? `url(${heroPhotoUrl}) center/cover no-repeat`
+                : 'linear-gradient(135deg, var(--green-deep), var(--green-mid))',
+              transition: 'opacity 0.5s ease',
+            }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.65) 100%)' }} />
+
+            {/* Content */}
+            <div style={{
+              position: 'relative', zIndex: 2, height: '100%',
+              display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+              padding: '64px', maxWidth: '700px',
+            }}>
+              <div style={{ fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', color: 'var(--gold)', fontWeight: 600, marginBottom: '12px' }}>
+                YOUR UPCOMING TRIP
+              </div>
+              <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: '48px', color: '#fff', fontWeight: 600, lineHeight: 1.1, marginBottom: '12px', textShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
+                {upcomingTrip.name}
+              </h1>
+              <div style={{ fontSize: '16px', color: 'rgba(255,255,255,0.8)', marginBottom: '8px' }}>
+                📍 {upcomingTrip.destination ?? 'Destination TBD'} &nbsp;·&nbsp; 🗓 {formatDateRange(upcomingTrip.start_date, upcomingTrip.end_date)}
+              </div>
+              <div style={{ display: 'flex', gap: '20px', marginBottom: '24px' }}>
+                <span style={{ fontSize: '14px', color: 'var(--gold-light)' }}>👥 {upcomingTrip.memberCount} {upcomingTrip.memberCount === 1 ? 'golfer' : 'golfers'}</span>
+                <span style={{ fontSize: '14px', color: 'var(--gold-light)' }}>⛳ {upcomingTrip.courseCount} {upcomingTrip.courseCount === 1 ? 'course' : 'courses'}</span>
+              </div>
+
+              {/* CTAs */}
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
+                <Link
+                  href={`/trip/${upcomingTrip.id}`}
+                  style={{
+                    padding: '12px 28px', borderRadius: 'var(--radius-sm)',
+                    background: 'var(--gold)', color: 'var(--green-deep)',
+                    fontSize: '12px', fontWeight: 700, letterSpacing: '0.08em',
+                    textTransform: 'uppercase', textDecoration: 'none',
+                  }}
+                >
+                  View Trip
+                </Link>
+                {upcomingTrip.share_token && (
+                  <Link
+                    href={`/share/${upcomingTrip.share_token}/brochure`}
+                    style={{
+                      padding: '12px 28px', borderRadius: 'var(--radius-sm)',
+                      background: 'transparent', border: '1px solid rgba(255,255,255,0.4)',
+                      color: '#fff', fontSize: '12px', fontWeight: 600,
+                      letterSpacing: '0.08em', textTransform: 'uppercase',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Share Brochure
+                  </Link>
+                )}
+              </div>
+
+              {/* Quick-access pills */}
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <QuickPill href={`/trip/${upcomingTrip.id}/tee-times`} label="Tee Times" />
+                <QuickPill href={`/trip/${upcomingTrip.id}/budget`} label="Budget" />
+                <QuickPill href={`/trip/${upcomingTrip.id}/accommodations`} label="Accommodations" />
+                <QuickPill href={`/trip/${upcomingTrip.id}/games`} label="Games" />
+                <QuickPill href={`/trip/${upcomingTrip.id}/report`} label="Trip Report" />
+              </div>
+            </div>
           </div>
-          <Link href="/trips/new" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '10px 20px', borderRadius: 'var(--radius-sm)', background: 'var(--green-deep)', color: 'var(--gold-light)', fontSize: '12px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', textDecoration: 'none' }}>
-            + New Trip
-          </Link>
-        </div>
+        )}
 
-        {/* Content */}
-        <div style={{ padding: '36px 48px', maxWidth: '960px' }}>
-
-          {loading && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
-              {[1, 2, 3].map((i) => (
-                <div key={i} style={{
-                  background: 'var(--white)', borderRadius: 'var(--radius-lg)',
-                  border: '1px solid var(--cream-dark)', overflow: 'hidden',
-                }}>
-                  <div style={{ height: '5px', background: 'var(--cream-dark)' }} />
-                  <div style={{ padding: '20px' }}>
-                    {/* Label skeleton */}
-                    <div style={{
-                      width: '60px', height: '8px', borderRadius: '4px',
-                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
-                      backgroundSize: '200% 100%',
-                      animation: 'shimmer 1.5s infinite',
-                      marginBottom: '10px',
-                    }} />
-                    {/* Title skeleton */}
-                    <div style={{
-                      width: '70%', height: '18px', borderRadius: '4px',
-                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
-                      backgroundSize: '200% 100%',
-                      animation: 'shimmer 1.5s infinite',
-                      marginBottom: '10px',
-                    }} />
-                    {/* Destination skeleton */}
-                    <div style={{
-                      width: '50%', height: '12px', borderRadius: '4px',
-                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
-                      backgroundSize: '200% 100%',
-                      animation: 'shimmer 1.5s infinite',
-                      marginBottom: '8px',
-                    }} />
-                    {/* Date skeleton */}
-                    <div style={{
-                      width: '40%', height: '11px', borderRadius: '4px',
-                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
-                      backgroundSize: '200% 100%',
-                      animation: 'shimmer 1.5s infinite',
-                      marginBottom: '16px',
-                    }} />
-                    {/* Stats row skeleton */}
-                    <div style={{ display: 'flex', gap: '16px', paddingTop: '12px', borderTop: '1px solid var(--cream-dark)' }}>
-                      <div style={{
-                        width: '80px', height: '12px', borderRadius: '4px',
-                        background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
-                        backgroundSize: '200% 100%',
-                        animation: 'shimmer 1.5s infinite',
-                      }} />
-                      <div style={{
-                        width: '80px', height: '12px', borderRadius: '4px',
-                        background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
-                        backgroundSize: '200% 100%',
-                        animation: 'shimmer 1.5s infinite',
-                      }} />
-                    </div>
-                    {/* Progress bar skeleton */}
-                    <div style={{
-                      marginTop: '14px', height: '3px', borderRadius: '99px',
-                      background: 'linear-gradient(90deg, var(--cream-dark) 25%, var(--cream) 50%, var(--cream-dark) 75%)',
-                      backgroundSize: '200% 100%',
-                      animation: 'shimmer 1.5s infinite',
-                    }} />
-                  </div>
-                </div>
-              ))}
-              <style>{`
-                @keyframes shimmer {
-                  0% { background-position: 200% 0; }
-                  100% { background-position: -200% 0; }
-                }
-              `}</style>
-            </div>
-          )}
-
-          {!loading && trips.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '80px 40px', background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--cream-dark)' }}>
-              <div style={{ fontSize: '48px', marginBottom: '16px' }}>⛳</div>
-              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '22px', color: 'var(--green-deep)', marginBottom: '8px' }}>No trips yet</div>
-              <p style={{ fontSize: '13px', color: 'var(--text-light)', fontWeight: 300, marginBottom: '24px' }}>
-                Create your first golf trip and invite the crew.
+        {/* ── Hero: New User ──────────────────────────────────────── */}
+        {isNewUser && (
+          <KenBurnsHero photos={kenBurnsPhotos}>
+            <div style={{
+              flex: 1, display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center',
+              textAlign: 'center', padding: '48px 24px',
+            }}>
+              <div style={{ fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', color: 'var(--gold)', fontWeight: 600, marginBottom: '16px' }}>
+                WELCOME TO GREENLIT
+              </div>
+              <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: '52px', color: '#fff', fontWeight: 600, lineHeight: 1.1, marginBottom: '16px', maxWidth: '600px', textShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
+                Your Group Golf Trip Starts Here
+              </h1>
+              <p style={{ fontSize: '16px', color: 'rgba(255,255,255,0.7)', marginBottom: '32px', maxWidth: '500px', lineHeight: 1.6 }}>
+                Plan courses, wrangle the crew, lock in tee times — all in one place.
               </p>
-              <Link href="/trips/new" style={{ display: 'inline-flex', padding: '10px 24px', borderRadius: 'var(--radius-sm)', background: 'var(--gold)', color: 'var(--green-deep)', fontSize: '12px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', textDecoration: 'none' }}>
-                Plan a Trip
+              <Link
+                href="/trips/new"
+                style={{
+                  padding: '14px 36px', borderRadius: 'var(--radius-sm)',
+                  background: 'var(--gold)', color: 'var(--green-deep)',
+                  fontSize: '13px', fontWeight: 700, letterSpacing: '0.08em',
+                  textTransform: 'uppercase', textDecoration: 'none',
+                }}
+              >
+                Plan Your First Trip
               </Link>
             </div>
-          )}
+          </KenBurnsHero>
+        )}
 
-          {trips.length > 0 && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' }}>
+        {/* ── Trips Section ───────────────────────────────────────── */}
+        {hasTrips && (
+          <FadeInSection style={{ padding: '56px 0 48px', background: 'var(--cream)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', padding: '0 48px', marginBottom: '24px' }}>
+              <div>
+                <div style={{ fontSize: '10px', letterSpacing: '0.25em', textTransform: 'uppercase', color: 'var(--green-light)', fontWeight: 600, marginBottom: '4px' }}>YOUR TRIPS</div>
+                <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '28px', color: 'var(--green-deep)', fontWeight: 600 }}>Upcoming &amp; Recent</h2>
+              </div>
+              <Link
+                href="/trips/new"
+                style={{
+                  padding: '10px 20px', borderRadius: 'var(--radius-sm)',
+                  background: 'var(--green-deep)', color: 'var(--gold-light)',
+                  fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em',
+                  textTransform: 'uppercase', textDecoration: 'none',
+                }}
+              >
+                + New Trip
+              </Link>
+            </div>
+            <ScrollStrip>
               {trips.map((trip) => (
-                <TripCard key={trip.id} trip={trip} />
+                <RichTripCard key={trip.id} trip={trip} />
+              ))}
+            </ScrollStrip>
+          </FadeInSection>
+        )}
+
+        {/* ── Featured Courses Strip ──────────────────────────────── */}
+        {featuredCourses.length > 0 && (
+          <FadeInSection style={{ padding: '56px 0 48px', background: 'var(--white)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', padding: '0 48px', marginBottom: '24px' }}>
+              <div>
+                <div style={{ fontSize: '10px', letterSpacing: '0.25em', textTransform: 'uppercase', color: 'var(--green-light)', fontWeight: 600, marginBottom: '4px' }}>EXPLORE COURSES</div>
+                <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '28px', color: 'var(--green-deep)', fontWeight: 600 }}>Editor&apos;s Picks</h2>
+              </div>
+              <Link
+                href="/courses"
+                style={{
+                  fontSize: '13px', color: 'var(--green-light)', textDecoration: 'none',
+                  fontWeight: 500, letterSpacing: '0.04em',
+                }}
+              >
+                View All →
+              </Link>
+            </div>
+            <ScrollStrip>
+              {featuredCourses.map((course) => (
+                <FeaturedCourseCard key={course.id} course={course} />
+              ))}
+            </ScrollStrip>
+          </FadeInSection>
+        )}
+
+        {/* ── Footer Strip (new users / few trips) ────────────────── */}
+        {(isNewUser || trips.length < 2) && !loading && (
+          <FadeInSection style={{
+            background: 'var(--green-deep)', padding: '64px 48px',
+          }}>
+            <div style={{
+              maxWidth: '1000px', margin: '0 auto',
+              display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '40px',
+              marginBottom: '40px',
+            }}>
+              {[
+                { icon: '🏌️', title: 'Curated Courses', desc: 'Browse world-class courses hand-picked for group trips, with real photos and insider details.' },
+                { icon: '👥', title: 'Wrangle the Crew', desc: 'Invite your group, track RSVPs, and keep everyone on the same page with shared itineraries.' },
+                { icon: '📋', title: 'One-Stop Planning', desc: 'Tee times, budgets, accommodations, and games — everything lives in one beautiful trip hub.' },
+              ].map((item) => (
+                <div key={item.title} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: '32px', marginBottom: '12px' }}>{item.icon}</div>
+                  <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', color: 'var(--gold-light)', marginBottom: '8px', fontWeight: 600 }}>{item.title}</div>
+                  <p style={{ fontSize: '13px', color: 'rgba(245,240,232,0.6)', lineHeight: 1.6, fontWeight: 300 }}>{item.desc}</p>
+                </div>
               ))}
             </div>
-          )}
+            <div style={{ textAlign: 'center' }}>
+              <Link
+                href="/trips/new"
+                style={{
+                  display: 'inline-block', padding: '12px 32px',
+                  borderRadius: 'var(--radius-sm)', background: 'var(--gold)',
+                  color: 'var(--green-deep)', fontSize: '12px', fontWeight: 700,
+                  letterSpacing: '0.08em', textTransform: 'uppercase',
+                  textDecoration: 'none',
+                }}
+              >
+                Get Started
+              </Link>
+            </div>
+          </FadeInSection>
+        )}
 
-          {/* Browse Courses CTA */}
-          <div style={{ textAlign: 'center', marginTop: '32px' }}>
-            <Link
-              href="/courses"
-              style={{
-                display:        'inline-flex',
-                alignItems:     'center',
-                gap:            '6px',
-                padding:        '10px 20px',
-                borderRadius:   'var(--radius-sm)',
-                border:         '1px solid var(--cream-dark)',
-                background:     'var(--white)',
-                color:          'var(--green-mid)',
-                fontSize:       '12px',
-                fontWeight:     500,
-                letterSpacing:  '0.06em',
-                textDecoration: 'none',
-              }}
-            >
-              ⛳ Browse Courses
-            </Link>
-          </div>
-
-        </div>
+        {/* ── Keyframes ───────────────────────────────────────────── */}
+        <style>{`
+          @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
+          @keyframes kenBurns {
+            0% { transform: scale(1) translate(0, 0); }
+            100% { transform: scale(1.1) translate(-2%, -1%); }
+          }
+        `}</style>
       </div>
     </ProtectedRoute>
   )
