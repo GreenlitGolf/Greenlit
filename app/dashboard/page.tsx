@@ -62,13 +62,24 @@ function formatPrice(min: number | null, max: number | null) {
   return null
 }
 
+/** Fallback gradient when no photo is available */
+const FALLBACK_GRADIENT = 'radial-gradient(ellipse at 60% 40%, rgba(45,90,60,0.6) 0%, rgba(10,28,10,1) 70%)'
+
 /** Fetch a single photo URL from the course-photos API */
 async function fetchPhoto(placeId: string): Promise<string | null> {
   try {
+    console.log('[Dashboard] Fetching photo for placeId:', placeId)
     const res = await fetch(`/api/course-photos/${encodeURIComponent(placeId)}`)
     const data = await res.json()
-    return data.photos?.[0] ?? null
-  } catch {
+    const url = data.photos?.[0] ?? null
+    if (url) {
+      console.log('[Dashboard] Photo URL resolved:', url.slice(0, 80) + '...')
+    } else {
+      console.warn('[Dashboard] No photos returned for placeId:', placeId, 'Response:', JSON.stringify(data))
+    }
+    return url
+  } catch (err) {
+    console.error('[Dashboard] Photo fetch error for placeId:', placeId, err)
     return null
   }
 }
@@ -261,7 +272,7 @@ function RichTripCard({ trip }: { trip: Trip }) {
           position: 'relative',
           background: photoUrl
             ? `url(${photoUrl}) center/cover no-repeat`
-            : 'linear-gradient(135deg, var(--green-deep), var(--green-mid))',
+            : FALLBACK_GRADIENT,
         }}>
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 60%)' }} />
           <div style={{
@@ -325,7 +336,7 @@ function FeaturedCourseCard({ course }: { course: FeaturedCourse }) {
           height: '160px',
           background: photoUrl
             ? `url(${photoUrl}) center/cover no-repeat`
-            : 'linear-gradient(135deg, var(--green-deep), var(--green-mid))',
+            : FALLBACK_GRADIENT,
         }} />
         <div style={{ padding: '16px' }}>
           <div style={{ fontFamily: 'var(--font-serif)', fontSize: '16px', color: 'var(--green-deep)', fontWeight: 600, lineHeight: 1.25, marginBottom: '4px' }}>
@@ -535,9 +546,15 @@ export default function DashboardPage() {
       setLoading(false)
 
       // Fetch hero photo from first trip's first course
-      const heroPlaceId = enriched[0]?.courses.find((c) => c.google_place_id)?.google_place_id
+      const heroTrip = enriched[0]
+      console.log('[Dashboard] Hero trip:', heroTrip?.name, '| Courses:', heroTrip?.courses.map(c => ({ name: c.name, placeId: c.google_place_id })))
+      const heroPlaceId = heroTrip?.courses.find((c) => c.google_place_id)?.google_place_id
+      console.log('[Dashboard] Hero placeId:', heroPlaceId ?? 'NONE — no courses have google_place_id')
       if (heroPlaceId) {
-        fetchPhoto(heroPlaceId).then(setHeroPhotoUrl)
+        fetchPhoto(heroPlaceId).then((url) => {
+          console.log('[Dashboard] Hero photo result:', url ? 'SUCCESS' : 'FAILED (null)')
+          setHeroPhotoUrl(url)
+        })
       }
     }
     fetchTrips()
@@ -626,15 +643,15 @@ export default function DashboardPage() {
               position: 'absolute', inset: 0,
               background: heroPhotoUrl
                 ? `url(${heroPhotoUrl}) center/cover no-repeat`
-                : 'linear-gradient(135deg, var(--green-deep), var(--green-mid))',
+                : FALLBACK_GRADIENT,
               transition: 'opacity 0.5s ease',
             }} />
-            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.25) 0%, rgba(0,0,0,0.65) 100%)' }} />
+            <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent 0%, rgba(10,28,10,0.75) 100%)' }} />
 
             {/* Content */}
             <div style={{
               position: 'relative', zIndex: 2, height: '100%',
-              display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+              display: 'flex', flexDirection: 'column', justifyContent: 'center',
               padding: '64px', maxWidth: '700px',
             }}>
               <div style={{ fontSize: '11px', letterSpacing: '0.25em', textTransform: 'uppercase', color: 'var(--gold)', fontWeight: 600, marginBottom: '12px' }}>
@@ -646,10 +663,29 @@ export default function DashboardPage() {
               <div style={{ fontSize: '16px', color: 'rgba(255,255,255,0.8)', marginBottom: '8px' }}>
                 📍 {upcomingTrip.destination ?? 'Destination TBD'} &nbsp;·&nbsp; 🗓 {formatDateRange(upcomingTrip.start_date, upcomingTrip.end_date)}
               </div>
-              <div style={{ display: 'flex', gap: '20px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', gap: '20px', marginBottom: '20px' }}>
                 <span style={{ fontSize: '14px', color: 'var(--gold-light)' }}>👥 {upcomingTrip.memberCount} {upcomingTrip.memberCount === 1 ? 'golfer' : 'golfers'}</span>
                 <span style={{ fontSize: '14px', color: 'var(--gold-light)' }}>⛳ {upcomingTrip.courseCount} {upcomingTrip.courseCount === 1 ? 'course' : 'courses'}</span>
               </div>
+
+              {/* Days away counter */}
+              {upcomingTrip.start_date && new Date(upcomingTrip.start_date) > new Date() && (
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginBottom: '28px' }}>
+                  <span style={{
+                    fontFamily: 'var(--font-serif)', fontSize: '48px', color: 'var(--gold)',
+                    fontWeight: 600, fontStyle: 'italic', lineHeight: 1,
+                    textShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                  }}>
+                    {Math.ceil((new Date(upcomingTrip.start_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}
+                  </span>
+                  <span style={{
+                    fontSize: '12px', color: 'rgba(196,168,79,0.6)',
+                    fontWeight: 600, letterSpacing: '0.2em', textTransform: 'uppercase',
+                  }}>
+                    DAYS AWAY
+                  </span>
+                </div>
+              )}
 
               {/* CTAs */}
               <div style={{ display: 'flex', gap: '12px', marginBottom: '24px', flexWrap: 'wrap' }}>
