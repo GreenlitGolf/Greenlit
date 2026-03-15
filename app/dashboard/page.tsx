@@ -227,12 +227,32 @@ function FadeInSection({ children, style }: { children: React.ReactNode; style?:
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) { setVisible(true); obs.disconnect() } },
-      { threshold: 0.1 },
-    )
-    obs.observe(el)
-    return () => obs.disconnect()
+
+    // If already in viewport (e.g. page loaded scrolled, or short hero), show immediately
+    const rect = el.getBoundingClientRect()
+    if (rect.top < window.innerHeight) {
+      setVisible(true)
+      return
+    }
+
+    // Delay observer setup so layout has settled after data fetch
+    const timeout = setTimeout(() => {
+      const obs = new IntersectionObserver(
+        ([entry]) => {
+          if (entry.isIntersecting) { setVisible(true); obs.disconnect() }
+        },
+        { threshold: 0.05 },
+      )
+      obs.observe(el)
+      // Store cleanup in a ref-like closure
+      cleanupRef = () => obs.disconnect()
+    }, 100)
+
+    let cleanupRef: (() => void) | null = null
+    return () => {
+      clearTimeout(timeout)
+      cleanupRef?.()
+    }
   }, [])
 
   return (
