@@ -1001,24 +1001,52 @@ export default function TeeTimesPage() {
       }
     }
 
-    // Budget integration — sync green fee line item (delete + insert to avoid duplicates)
+    // Budget integration — group green fee items by course+date
     if (saved) {
       try {
-        // Always delete existing budget items for this tee time first
-        await supabase.from('budget_items')
-          .delete()
-          .eq('source_type', 'tee_time')
-          .eq('source_id', saved.id)
+        // Find all tee times for this trip with same course name + date
+        const { data: siblings } = await supabase
+          .from('tee_times')
+          .select('id, green_fee_per_player, num_players, tee_time')
+          .eq('trip_id', id)
+          .eq('course_name', saved.course_name)
+          .eq('tee_date', saved.tee_date)
 
-        // Re-insert if green fee data is present
-        if (saved.green_fee_per_player != null && saved.num_players != null) {
+        const allSiblings = siblings || []
+        const siblingIds = allSiblings.map(s => s.id)
+
+        // Delete ALL budget items linked to any of these sibling tee times
+        if (siblingIds.length > 0) {
+          await supabase.from('budget_items')
+            .delete()
+            .eq('source_type', 'tee_time')
+            .in('source_id', siblingIds)
+        }
+
+        // Recalculate: sum fees across all siblings with valid data
+        const withFees = allSiblings.filter(
+          s => s.green_fee_per_player != null && s.num_players != null
+        )
+        if (withFees.length > 0) {
+          const totalAmount = withFees.reduce(
+            (sum, s) => sum + (s.green_fee_per_player! * s.num_players!), 0
+          )
+          const totalPlayers = withFees.reduce(
+            (sum, s) => sum + (s.num_players ?? 0), 0
+          )
+          const dateLabel = new Date(saved.tee_date + 'T12:00:00')
+            .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          const groupLabel = withFees.length === 1
+            ? `Green Fees — ${saved.course_name}`
+            : `Green Fees — ${saved.course_name} (${dateLabel} · ${withFees.length} groups · ${totalPlayers} players)`
+
           await supabase.from('budget_items').insert({
             trip_id:     id,
             category:    'green_fees',
-            label:       `Green Fees — ${saved.course_name}`,
-            amount:      saved.green_fee_per_player * saved.num_players,
+            label:       groupLabel,
+            amount:      totalAmount,
             source_type: 'tee_time',
-            source_id:   saved.id,
+            source_id:   withFees[0].id, // link to first tee time in group
             added_by:    session?.user.id ?? null,
           })
         }
@@ -1043,10 +1071,54 @@ export default function TeeTimesPage() {
   async function handleDelete(tt: TeeTime) {
     await supabase.from('tee_times').delete().eq('id', tt.id)
     setTeeTimes(prev => prev.filter(t => t.id !== tt.id))
+
+    // Re-group budget items for remaining siblings with same course+date
     try {
+      const { data: siblings } = await supabase
+        .from('tee_times')
+        .select('id, green_fee_per_player, num_players, tee_time')
+        .eq('trip_id', id)
+        .eq('course_name', tt.course_name)
+        .eq('tee_date', tt.tee_date)
+
+      const allSiblings = siblings || []
+      const allIds = [...allSiblings.map(s => s.id), tt.id]
+
+      // Delete all budget items for this course+date group (including the deleted tee time)
       await supabase.from('budget_items')
-        .delete().eq('source_type', 'tee_time').eq('source_id', tt.id)
+        .delete()
+        .eq('source_type', 'tee_time')
+        .in('source_id', allIds)
+
+      // Re-create grouped item if any siblings remain with fees
+      const withFees = allSiblings.filter(
+        s => s.green_fee_per_player != null && s.num_players != null
+      )
+      if (withFees.length > 0) {
+        const totalAmount = withFees.reduce(
+          (sum, s) => sum + (s.green_fee_per_player! * s.num_players!), 0
+        )
+        const totalPlayers = withFees.reduce(
+          (sum, s) => sum + (s.num_players ?? 0), 0
+        )
+        const dateLabel = new Date(tt.tee_date + 'T12:00:00')
+          .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        const groupLabel = withFees.length === 1
+          ? `Green Fees — ${tt.course_name}`
+          : `Green Fees — ${tt.course_name} (${dateLabel} · ${withFees.length} groups · ${totalPlayers} players)`
+
+        await supabase.from('budget_items').insert({
+          trip_id:     id,
+          category:    'green_fees',
+          label:       groupLabel,
+          amount:      totalAmount,
+          source_type: 'tee_time',
+          source_id:   withFees[0].id,
+          added_by:    session?.user.id ?? null,
+        })
+      }
     } catch { /* ignore */ }
+
     // Remove matching itinerary item
     if (trip?.start_date) {
       try {

@@ -1645,14 +1645,25 @@ function TripItinerarySection({
                                 display: 'flex', gap: '16px', alignItems: 'flex-start',
                               }}>
                                 {/* Time */}
-                                <div style={{
-                                  width: '68px', flexShrink: 0, fontSize: '11px',
-                                  color: 'var(--text-light)', fontFamily: 'var(--font-sans)',
-                                  fontWeight: 600, letterSpacing: '0.05em',
-                                  textTransform: 'uppercase', paddingTop: '2px',
-                                }}>
-                                  {item.start_time || '—'}
-                                </div>
+                                {item.start_time ? (
+                                  <div style={{
+                                    width: '68px', flexShrink: 0, fontSize: '11px',
+                                    color: 'var(--text-light)', fontFamily: 'var(--font-sans)',
+                                    fontWeight: 600, letterSpacing: '0.05em',
+                                    textTransform: 'uppercase', paddingTop: '2px',
+                                  }}>
+                                    {item.start_time}
+                                  </div>
+                                ) : (
+                                  <div style={{
+                                    width: '68px', flexShrink: 0, fontSize: '9px',
+                                    color: 'var(--cream-dark)', fontFamily: 'var(--font-sans)',
+                                    fontWeight: 400, paddingTop: '4px',
+                                    fontStyle: 'italic',
+                                  }}>
+                                    No time
+                                  </div>
+                                )}
 
                                 {/* Main */}
                                 <div style={{ flex: 1, minWidth: 0 }}>

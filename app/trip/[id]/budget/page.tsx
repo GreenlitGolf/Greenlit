@@ -940,8 +940,68 @@ export default function BudgetPage() {
       if (dupeIds.length > 0) {
         supabase.from('budget_items').delete().in('id', dupeIds).then(() => {})
       }
-      setItems(raw.filter(i => !dupeIds.includes(i.id)))
+      const afterDedup = raw.filter(i => !dupeIds.includes(i.id))
+
+      // Consolidate: merge multiple tee_time budget items for the same course into one
+      const cleaned = afterDedup
+      const teeTimeItems = cleaned.filter(i => i.source_type === 'tee_time')
+      // Group by course name extracted from label (e.g. "Green Fees — The Loop at Forest Dunes")
+      const courseGroups = new Map<string, BudgetItem[]>()
+      for (const item of teeTimeItems) {
+        const courseName = item.label.replace(/^Green Fees — /, '').replace(/ \(.*\)$/, '')
+        const existing = courseGroups.get(courseName) || []
+        existing.push(item)
+        courseGroups.set(courseName, existing)
+      }
+      // If any course has multiple individual items, merge them
+      const toDelete: string[] = []
+      const toKeep: BudgetItem[] = []
+      for (const [courseName, group] of courseGroups) {
+        if (group.length <= 1) continue
+        // Sum amounts
+        const totalAmount = group.reduce((sum, g) => sum + g.amount, 0)
+        // Use tee_times data to get player/group count
+        const matchingTTs = (ttRes.data as TeeTime[] || []).filter(
+          tt => group.some(g => g.source_id === tt.id)
+        )
+        const totalPlayers = matchingTTs.reduce((s, tt) => s + (tt.num_players ?? 0), 0)
+        // Build grouped label — try to get date from matching tee times
+        const dates = [...new Set(matchingTTs.map(tt => tt.tee_date))].sort()
+        const dateParts = dates.map(d =>
+          new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        )
+        const dateStr = dateParts.join(', ')
+        const groupLabel = dateStr
+          ? `Green Fees — ${courseName} (${dateStr} · ${matchingTTs.length} groups · ${totalPlayers} players)`
+          : `Green Fees — ${courseName} (${group.length} groups)`
+
+        // Keep first item, update it, delete the rest
+        const keep = group[0]
+        const deleteIds = group.slice(1).map(g => g.id)
+        toDelete.push(...deleteIds)
+        toKeep.push({ ...keep, label: groupLabel, amount: totalAmount })
+
+        // Update the kept item in the DB and delete extras (fire-and-forget)
+        supabase.from('budget_items')
+          .update({ label: groupLabel, amount: totalAmount })
+          .eq('id', keep.id)
+          .then(() => {})
+        if (deleteIds.length > 0) {
+          supabase.from('budget_items').delete().in('id', deleteIds).then(() => {})
+        }
+      }
+
+      if (toDelete.length > 0) {
+        // Replace items with consolidated versions
+        const consolidated = cleaned
+          .filter(i => !toDelete.includes(i.id))
+          .map(i => toKeep.find(k => k.id === i.id) || i)
+        setItems(consolidated)
+      } else {
+        setItems(afterDedup)
+      }
     }
+
     if (ttRes.data)    setTeeTimes(ttRes.data as TeeTime[])
     if (accRes.data)   setAccs(accRes.data as Acc[])
 

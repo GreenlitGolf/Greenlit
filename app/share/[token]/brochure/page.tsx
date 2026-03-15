@@ -526,12 +526,16 @@ export default async function BrochurePage({
                           </div>
                         ) : (
                           <div key={di.id} style={{ display: 'flex', alignItems: 'baseline', gap: '12px' }}>
-                            <div style={{
-                              width: '80px', flexShrink: 0, fontSize: '13px',
-                              fontFamily: 'var(--font-serif)', fontWeight: 600, color: 'var(--gold)',
-                            }}>
-                              {di.start_time || ''}
-                            </div>
+                            {di.start_time ? (
+                              <div style={{
+                                width: '80px', flexShrink: 0, fontSize: '13px',
+                                fontFamily: 'var(--font-serif)', fontWeight: 600, color: 'var(--gold)',
+                              }}>
+                                {di.start_time}
+                              </div>
+                            ) : (
+                              <div style={{ width: '80px', flexShrink: 0 }} />
+                            )}
                             <div style={{ flex: 1 }}>
                               {di.type === 'tee_time' ? (
                                 <span style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'baseline', gap: '6px' }}>

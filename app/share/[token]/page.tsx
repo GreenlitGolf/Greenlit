@@ -278,7 +278,7 @@ export default async function ShareQuickView({
                               {item.start_time}
                             </span>
                           )}
-                          {!item.start_time && <span style={{ minWidth: '62px' }} />}
+                          {!item.start_time && item.type !== 'tee_time' && <span style={{ minWidth: '62px' }} />}
                           <span>{item.title}</span>
                         </div>
                       )) : (
