@@ -1,8 +1,16 @@
 {
+  "functions": {
+    "api/cron/enrich-courses/route.ts": {
+      "maxDuration": 300
+    },
+    "api/courses/enrich-on-demand/route.ts": {
+      "maxDuration": 300
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/enrich-courses",
-      "schedule": "0 6 * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }

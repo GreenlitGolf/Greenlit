@@ -287,8 +287,8 @@ async function standardResearch(
   country: string,
 ): Promise<{ textContent: string }> {
   const response = await anthropic.messages.create({
-    model      : 'claude-sonnet-4-5',
-    max_tokens : 4000,
+    model      : 'claude-haiku-4-5',
+    max_tokens : 2000,
     tools      : [{ type: 'web_search_20250305' as const, name: 'web_search' }] as Parameters<typeof anthropic.messages.create>[0]['tools'],
     system     : STANDARD_SYSTEM_PROMPT,
     messages   : [{
@@ -401,10 +401,15 @@ export async function enrichCourse(
   try {
     console.log(`[enrichCourse] Starting ${mode} enrichment for "${name}" (${location})`)
 
-    // ── Call the appropriate research function ────────────
-    const { textContent } = mode === 'deep'
-      ? await deepResearch(name, location, country)
-      : await standardResearch(name, location, country)
+    // ── Research + Google Places lookup in parallel ──────
+    const [researchResult, googlePlaceId] = await Promise.all([
+      mode === 'deep'
+        ? deepResearch(name, location, country)
+        : standardResearch(name, location, country),
+      fetchGooglePlaceId(name, location),
+    ])
+
+    const { textContent } = researchResult
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const courseData = extractJSON(textContent) as any
@@ -423,9 +428,7 @@ export async function enrichCourse(
     const slug         = generateSlug(courseData.name ?? name)
     const resolvedName = courseData.name     ?? name
     const resolvedLoc  = courseData.location ?? location
-
-    // Look up a real Google Place ID via the Places API Text Search
-    const googlePlaceId = await fetchGooglePlaceId(resolvedName, resolvedLoc)
+    // googlePlaceId already resolved from parallel call above
 
     const courseRow: Record<string, unknown> = {
       slug,
