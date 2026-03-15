@@ -1,9 +1,9 @@
 {
   "functions": {
-    "api/cron/enrich-courses/route.ts": {
+    "app/api/cron/enrich-courses/route.ts": {
       "maxDuration": 300
     },
-    "api/courses/enrich-on-demand/route.ts": {
+    "app/api/courses/enrich-on-demand/route.ts": {
       "maxDuration": 300
     }
   },
