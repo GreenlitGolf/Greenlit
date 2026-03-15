@@ -3,7 +3,7 @@ import { createClient }               from '@supabase/supabase-js'
 import { createServerSupabaseClient } from '@/lib/supabase-server'
 import { enrichCourse }               from '@/lib/enrichCourse'
 
-export const maxDuration = 60
+export const maxDuration = 300
 
 function adminSupabase() {
   return createClient(
