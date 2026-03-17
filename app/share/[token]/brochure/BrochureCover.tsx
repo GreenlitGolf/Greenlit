@@ -82,7 +82,7 @@ export default function BrochureCover({ tripName, destination, startDate, endDat
 
       {/* Group photo inset (circular, bottom right) */}
       {coverUrl && (
-        <div style={{
+        <div className="brochure-cover-photo" style={{
           position: 'absolute', bottom: '48px', right: '48px',
           width: '120px', height: '120px', borderRadius: '50%',
           border: '3px solid rgba(196,168,79,0.7)',
@@ -94,7 +94,7 @@ export default function BrochureCover({ tripName, destination, startDate, endDat
       )}
 
       {/* Text overlay — bottom left */}
-      <div style={{ position: 'relative', zIndex: 2, padding: '64px 64px 64px' }}>
+      <div className="brochure-cover-text" style={{ position: 'relative', zIndex: 2, padding: '64px 64px 64px' }}>
         <div style={{
           fontSize: '11px', letterSpacing: '0.28em', textTransform: 'uppercase',
           color: 'var(--gold)', fontWeight: 600, marginBottom: '16px',
@@ -104,7 +104,7 @@ export default function BrochureCover({ tripName, destination, startDate, endDat
         </div>
 
         <h1 style={{
-          fontFamily: 'var(--font-serif)', fontSize: 'clamp(48px, 7vw, 84px)',
+          fontFamily: 'var(--font-serif)', fontSize: 'clamp(36px, 10vw, 80px)',
           color: '#fff', fontWeight: 700, lineHeight: 1.1,
           marginBottom: '16px', maxWidth: '700px',
           textShadow: '0 2px 12px rgba(0,0,0,0.4)',
@@ -130,6 +130,20 @@ export default function BrochureCover({ tripName, destination, startDate, endDat
           </div>
         )}
       </div>
+
+      <style>{`
+        @media (max-width: 640px) {
+          .brochure-cover-text {
+            padding: 24px 20px !important;
+          }
+          .brochure-cover-photo {
+            bottom: 24px !important;
+            right: 20px !important;
+            width: 80px !important;
+            height: 80px !important;
+          }
+        }
+      `}</style>
     </section>
   )
 }

@@ -97,16 +97,17 @@ export default function OrganizerBanner({
   return (
     <>
       {/* ── Banner ── */}
-      <div style={{
+      <div className="organizer-banner" style={{
         background: 'var(--cream)', borderBottom: '1px solid var(--cream-dark)',
         padding: '10px 40px', display: 'flex', alignItems: 'center',
         justifyContent: 'space-between', gap: '16px', flexShrink: 0,
+        flexWrap: 'wrap',
       }}>
-        <div style={{ fontSize: '12px', color: 'var(--text-mid)', fontWeight: 300 }}>
+        <div className="organizer-banner-text" style={{ fontSize: '12px', color: 'var(--text-mid)', fontWeight: 300 }}>
           <span style={{ color: 'var(--gold)', marginRight: '6px' }}>✦</span>
           You&apos;re viewing your shareable trip report
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div className="organizer-banner-buttons" style={{ display: 'flex', gap: '8px' }}>
           <button
             onClick={() => { setCustomizeOpen(true); setShareOpen(false) }}
             style={{ ...btnBase, background: 'var(--green-deep)', color: 'var(--gold-light)' }}
@@ -300,6 +301,26 @@ export default function OrganizerBanner({
       <style>{`
         @keyframes slideInRight { from { transform: translateX(100%) } to { transform: translateX(0) } }
         @keyframes fadeInDown { from { opacity: 0; transform: translateY(-6px) } to { opacity: 1; transform: translateY(0) } }
+        @media (max-width: 640px) {
+          .organizer-banner {
+            padding: 10px 16px !important;
+            flex-direction: column !important;
+            align-items: stretch !important;
+            gap: 8px !important;
+          }
+          .organizer-banner-text {
+            display: none !important;
+          }
+          .organizer-banner-buttons {
+            display: flex !important;
+            gap: 8px !important;
+          }
+          .organizer-banner-buttons button {
+            flex: 1 !important;
+            min-height: 44px !important;
+            font-size: 13px !important;
+          }
+        }
       `}</style>
     </>
   )

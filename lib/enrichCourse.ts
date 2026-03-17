@@ -17,6 +17,7 @@ export type EnrichResult =
   | { success: true;  slug: string; name: string; location: string }
   | { success: false; isPrivate: true;    reason: string }
   | { success: false; isRateLimit: true;  error: string }
+  | { success: false; isCreditExhausted: true; error: string }
   | { success: false; error: string }
 
 export type EnrichMode = 'standard' | 'deep'
@@ -504,6 +505,16 @@ export async function enrichCourse(
         .update({ status: 'pending', notes: null })
         .eq('id', queueId)
       return { success: false, isRateLimit: true, error: 'Rate limit hit — course reset to pending' }
+    }
+
+    const isCreditExhausted = message.includes('credit balance') ||
+                              message.includes('Your credit') ||
+                              (message.includes('invalid_request_error') && message.includes('cred'))
+    if (isCreditExhausted) {
+      await db.from('course_queue')
+        .update({ status: 'pending', notes: 'Credit balance exhausted — will retry' })
+        .eq('id', queueId)
+      return { success: false, isCreditExhausted: true, error: 'Anthropic credit balance too low' }
     }
 
     await db.from('course_queue').update({

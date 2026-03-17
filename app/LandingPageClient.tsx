@@ -254,7 +254,7 @@ export default function LandingPageClient() {
           Greenlit
         </Link>
 
-        {/* Desktop links */}
+        {/* Desktop links (hidden on mobile) */}
         <div className="landing-desktop-nav" style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <Link href="/courses" style={{ fontSize: '12px', color: 'rgba(245,240,232,0.6)', textDecoration: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>
             Courses
@@ -262,29 +262,17 @@ export default function LandingPageClient() {
           <Link href="/login" style={{ fontSize: '12px', color: 'rgba(245,240,232,0.6)', textDecoration: 'none', letterSpacing: '0.04em', fontWeight: 400 }}>
             Sign In
           </Link>
-          <Link href="/signup" style={{
-            padding: '8px 18px', borderRadius: 'var(--radius-sm)',
-            background: 'var(--gold)', color: 'var(--green-deep)',
-            fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em',
-            textTransform: 'uppercase', textDecoration: 'none',
-          }}>
-            Get Started
-          </Link>
         </div>
 
-        {/* Mobile hamburger */}
-        <button
-          className="landing-mobile-hamburger"
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          style={{
-            display: 'none', background: 'none', border: 'none',
-            color: 'var(--gold-light)', fontSize: '24px', cursor: 'pointer',
-            padding: '4px',
-          }}
-          aria-label="Menu"
-        >
-          {mobileMenuOpen ? '\u2715' : '\u2630'}
-        </button>
+        {/* Get Started — always visible */}
+        <Link href="/signup" className="landing-get-started" style={{
+          padding: '8px 18px', borderRadius: 'var(--radius-sm)',
+          background: 'var(--gold)', color: 'var(--green-deep)',
+          fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em',
+          textTransform: 'uppercase', textDecoration: 'none',
+        }}>
+          Get Started
+        </Link>
       </nav>
 
       {/* Mobile menu dropdown */}
@@ -725,13 +713,13 @@ export default function LandingPageClient() {
             display: block !important;
           }
         }
-        /* Mobile nav toggle */
+        /* Mobile: show only logo + Get Started */
         @media (max-width: 640px) {
           .landing-desktop-nav {
             display: none !important;
           }
-          .landing-mobile-hamburger {
-            display: block !important;
+          .landing-mobile-menu {
+            display: none !important;
           }
         }
       `}</style>

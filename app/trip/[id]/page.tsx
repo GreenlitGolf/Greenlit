@@ -300,26 +300,30 @@ const itinInputStyle: React.CSSProperties = {
 
 function buildNavItems(memberCount: number): NavItem[] {
   return [
-    { id: 'concierge', icon: '✦',  label: 'Golf Concierge',  href: '' },
-    { id: 'itinerary', icon: '📅', label: 'Trip Itinerary',  href: '' },
-    { id: 'games',     icon: '🎲', label: 'Golf Games',      href: '' },
-    { id: 'teetimes',  icon: '🕐', label: 'Tee Times',       href: '' },
-    { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
-    { id: 'hotels',    icon: '🏨', label: 'Accommodations',  href: '' },
-    { id: 'group',     icon: '👥', label: 'Group & Members', href: '', badge: memberCount > 0 ? memberCount : undefined },
-    { id: 'budget',    icon: '💰', label: 'Budget Tracker',  href: '' },
+    { id: 'concierge',  icon: '✦',  label: 'Golf Concierge',   href: '' },
+    { id: 'courses',    icon: '🗺️', label: 'Course Directory',  href: '' },
+    { id: 'tripcourses',icon: '⛳', label: 'Trip Courses',      href: '' },
+    { id: 'itinerary',  icon: '📅', label: 'Trip Itinerary',    href: '' },
+    { id: 'games',      icon: '🎲', label: 'Golf Games',        href: '' },
+    { id: 'teetimes',   icon: '🕐', label: 'Tee Times',         href: '' },
+    { id: 'report',     icon: '📄', label: 'Trip Report',       href: '' },
+    { id: 'hotels',     icon: '🏨', label: 'Accommodations',    href: '' },
+    { id: 'group',      icon: '👥', label: 'Group & Members',   href: '', badge: memberCount > 0 ? memberCount : undefined },
+    { id: 'budget',     icon: '💰', label: 'Budget Tracker',    href: '' },
   ]
 }
 
 const SECTION_LABELS: Record<string, string> = {
-  concierge: 'Golf Concierge',
-  itinerary: 'Trip Itinerary',
-  games:     'Golf Games',
-  teetimes:  'Tee Times',
-  report:    'Trip Report',
-  hotels:    'Accommodations',
-  group:     'Group & Members',
-  budget:    'Budget Tracker',
+  concierge:   'Golf Concierge',
+  courses:     'Course Directory',
+  tripcourses: 'Trip Courses',
+  itinerary:   'Trip Itinerary',
+  games:       'Golf Games',
+  teetimes:    'Tee Times',
+  report:      'Trip Report',
+  hotels:      'Accommodations',
+  group:       'Group & Members',
+  budget:      'Budget Tracker',
 }
 
 // ─── Section: Golf Concierge ──────────────────────────────────────────────────
@@ -2156,6 +2160,185 @@ function TripItinerarySection({
   )
 }
 
+// ─── Section: Trip Courses ───────────────────────────────────────────────────
+
+type TripCourseDetail = {
+  id: string
+  trip_id: string
+  course_id: string | null
+  course_name: string | null
+  course_location: string | null
+  courses: {
+    slug: string
+    google_place_id: string | null
+  } | null
+}
+
+function TripCoursesSection({ tripId }: { tripId: string }) {
+  const { session } = useAuth()
+  const [courses, setCourses] = useState<TripCourseDetail[]>([])
+  const [loading, setLoading] = useState(true)
+  const [removing, setRemoving] = useState<string | null>(null)
+
+  useEffect(() => {
+    supabase
+      .from('trip_courses')
+      .select('id, trip_id, course_id, course_name, course_location, courses(slug, google_place_id)')
+      .eq('trip_id', tripId)
+      .then(({ data }) => {
+        // Supabase join returns courses as array; flatten to single object
+        const mapped = (data ?? []).map((row: Record<string, unknown>) => ({
+          ...row,
+          courses: Array.isArray(row.courses) ? row.courses[0] ?? null : row.courses ?? null,
+        })) as TripCourseDetail[]
+        setCourses(mapped)
+        setLoading(false)
+      })
+  }, [tripId])
+
+  async function handleRemove(courseId: string) {
+    setRemoving(courseId)
+    const { data: { session: s } } = await supabase.auth.getSession()
+    await fetch(`/api/trips/${tripId}/courses`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s?.access_token ?? ''}` },
+      body: JSON.stringify({ courseId }),
+    })
+    setCourses((prev) => prev.filter((c) => c.course_id !== courseId))
+    setRemoving(null)
+  }
+
+  if (loading) {
+    return <div style={{ padding: '40px', textAlign: 'center', fontSize: '13px', color: 'var(--text-light)' }}>Loading courses…</div>
+  }
+
+  return (
+    <div style={{ maxWidth: '680px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+        <div>
+          <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '28px', color: 'var(--green-deep)', fontWeight: 700, margin: '0 0 4px' }}>
+            Trip Courses
+          </h2>
+          <p style={{ fontSize: '13px', color: 'var(--text-light)', fontWeight: 300, margin: 0, fontFamily: 'var(--font-sans)' }}>
+            {courses.length} course{courses.length !== 1 ? 's' : ''} added
+          </p>
+        </div>
+        <a
+          href={`/courses?tripId=${tripId}`}
+          style={{
+            padding: '8px 16px', borderRadius: 'var(--radius-sm)',
+            background: 'var(--gold)', color: 'var(--green-deep)',
+            fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+            textDecoration: 'none', fontFamily: 'var(--font-sans)',
+          }}
+        >
+          + Add Course
+        </a>
+      </div>
+
+      {courses.length === 0 ? (
+        <div style={{ background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '2px dashed var(--cream-dark)', padding: '48px 36px', textAlign: 'center' }}>
+          <div style={{ fontSize: '40px', marginBottom: '12px' }}>⛳</div>
+          <div style={{ fontFamily: 'var(--font-serif)', fontSize: '18px', color: 'var(--green-deep)', marginBottom: '8px' }}>No courses added yet</div>
+          <p style={{ fontSize: '13px', color: 'var(--text-light)', fontWeight: 300, margin: '0 0 20px', fontFamily: 'var(--font-sans)', lineHeight: 1.6 }}>
+            Browse the directory or ask the Golf Concierge for recommendations.
+          </p>
+          <a
+            href={`/courses?tripId=${tripId}`}
+            style={{
+              display: 'inline-block', padding: '10px 20px', borderRadius: 'var(--radius-md)',
+              background: 'var(--gold)', color: 'var(--green-deep)',
+              fontSize: '12px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+              textDecoration: 'none', fontFamily: 'var(--font-sans)',
+            }}
+          >
+            Browse Course Directory →
+          </a>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {courses.map((c) => (
+            <TripCourseCard
+              key={c.id}
+              course={c}
+              onRemove={() => c.course_id && handleRemove(c.course_id)}
+              removing={removing === c.course_id}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TripCourseCard({ course, onRemove, removing }: {
+  course: TripCourseDetail; onRemove: () => void; removing: boolean
+}) {
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null)
+  const placeId = course.courses?.google_place_id
+
+  useEffect(() => {
+    if (!placeId) return
+    fetch(`/api/course-photos/${placeId}`)
+      .then((r) => r.json())
+      .then((d) => { if (d.photos?.[0]) setPhotoUrl(d.photos[0]) })
+      .catch(() => {})
+  }, [placeId])
+
+  return (
+    <div style={{
+      background: 'var(--white)', border: '1px solid var(--cream-dark)', borderRadius: 'var(--radius-lg)',
+      display: 'flex', overflow: 'hidden', alignItems: 'center',
+    }}>
+      {/* Photo */}
+      <div style={{
+        width: '100px', minHeight: '80px', flexShrink: 0,
+        background: photoUrl ? `url(${photoUrl}) center/cover` : 'linear-gradient(135deg, var(--green-mid), var(--green-light))',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        {!photoUrl && <span style={{ fontSize: '24px' }}>⛳</span>}
+      </div>
+
+      {/* Info */}
+      <div style={{ flex: 1, padding: '14px 18px', minWidth: 0 }}>
+        <div style={{ fontFamily: 'var(--font-serif)', fontSize: '15px', fontWeight: 600, color: 'var(--green-deep)', marginBottom: '3px' }}>
+          {course.course_name ?? 'Unknown Course'}
+        </div>
+        <div style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: 300 }}>
+          📍 {course.course_location ?? 'Unknown location'}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: '8px', padding: '14px 16px', flexShrink: 0, alignItems: 'center' }}>
+        {course.courses?.slug && (
+          <a
+            href={`/course/${course.courses.slug}`}
+            style={{
+              fontSize: '11px', fontWeight: 600, color: 'var(--gold)', textDecoration: 'none',
+              letterSpacing: '0.03em', whiteSpace: 'nowrap',
+            }}
+          >
+            View Course →
+          </a>
+        )}
+        <button
+          onClick={onRemove}
+          disabled={removing}
+          style={{
+            background: 'transparent', border: '1px solid rgba(192,57,43,0.3)',
+            borderRadius: 'var(--radius-sm)', padding: '5px 10px',
+            fontSize: '11px', color: '#c0392b', cursor: removing ? 'default' : 'pointer',
+            fontFamily: 'var(--font-sans)', fontWeight: 500, opacity: removing ? 0.5 : 1,
+          }}
+        >
+          {removing ? '…' : 'Remove'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Section: Coming Soon ─────────────────────────────────────────────────────
 
 function ComingSoon({ label }: { label: string }) {
@@ -2176,7 +2359,7 @@ export default function TripPage() {
   const router      = useRouter()
   const searchParams = useSearchParams()
 
-  const VALID_TABS = ['concierge', 'itinerary', 'group']
+  const VALID_TABS = ['concierge', 'itinerary', 'group', 'tripcourses']
   const initialTab = searchParams.get('tab')
   const defaultNav = initialTab && VALID_TABS.includes(initialTab) ? initialTab : 'concierge'
 
@@ -2250,9 +2433,10 @@ export default function TripPage() {
     color:    m.role === 'organizer' ? '#c4a84f' : AVATAR_COLORS[i % AVATAR_COLORS.length],
   }))
 
-  const isConcierge = activeNav === 'concierge'
-  const isItinerary = activeNav === 'itinerary'
-  const isFullHeight = isConcierge || isItinerary
+  const isConcierge   = activeNav === 'concierge'
+  const isItinerary   = activeNav === 'itinerary'
+  const isTripCourses = activeNav === 'tripcourses'
+  const isFullHeight  = isConcierge || isItinerary
 
   // Compute handicap range string for concierge context
   const hcps = members.map((m) => m.handicap).filter((h): h is number => h != null)
@@ -2275,6 +2459,7 @@ export default function TripPage() {
                 if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);      return }
                 if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }
                 if (navId === 'budget')   { router.push(`/trip/${id}/budget`);         return }
+                if (navId === 'courses')  { router.push(`/courses?tripId=${id}`);       return }
                 setEditing(false); setActiveNav(navId)
               }}
             tripName={trip.name}
@@ -2303,7 +2488,7 @@ export default function TripPage() {
             </div>
           )}
 
-          {trip && !editing && (
+          {trip && (
             <>
               {/* Page header */}
               <div style={{
@@ -2325,9 +2510,25 @@ export default function TripPage() {
                     {trip.name}
                   </div>
                 </div>
-                <Link href="/dashboard" style={{ fontSize: '12px', color: 'var(--text-light)', textDecoration: 'none', fontWeight: 400 }}>
-                  ← Dashboard
-                </Link>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  {isOrganizer && (
+                    <button
+                      onClick={() => setEditing(true)}
+                      style={{
+                        padding: '7px 14px', borderRadius: 'var(--radius-sm)',
+                        border: '1px solid var(--cream-dark)', background: 'var(--white)',
+                        fontSize: '11px', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+                        color: 'var(--green-deep)', cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                        transition: 'border-color 0.15s',
+                      }}
+                    >
+                      Edit Trip
+                    </button>
+                  )}
+                  <Link href="/dashboard" style={{ fontSize: '12px', color: 'var(--text-light)', textDecoration: 'none', fontWeight: 400 }}>
+                    ← Dashboard
+                  </Link>
+                </div>
               </div>
 
               {/* Section routing */}
@@ -2363,6 +2564,8 @@ export default function TripPage() {
                       onMembersChange={setMembers}
                       currentUserId={session?.user.id}
                     />
+                  ) : isTripCourses ? (
+                    <TripCoursesSection tripId={trip.id} />
                   ) : (
                     <ComingSoon label={SECTION_LABELS[activeNav]} />
                   )}
@@ -2371,17 +2574,13 @@ export default function TripPage() {
             </>
           )}
 
+          {/* Edit Trip modal */}
           {trip && editing && (
-            <div style={{ padding: '40px 48px', maxWidth: '560px' }}>
-              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '26px', color: 'var(--green-deep)', marginBottom: '24px' }}>Edit Trip</div>
-              <div style={{ background: 'var(--white)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--cream-dark)', padding: '28px' }}>
-                <EditTripForm
-                  trip={trip}
-                  onSave={(updated) => { setTrip({ ...trip, ...updated }); setEditing(false) }}
-                  onCancel={() => setEditing(false)}
-                />
-              </div>
-            </div>
+            <EditTripForm
+              trip={trip}
+              onSave={(updated) => { setTrip({ ...trip, ...updated }); setEditing(false) }}
+              onCancel={() => setEditing(false)}
+            />
           )}
 
         </div>

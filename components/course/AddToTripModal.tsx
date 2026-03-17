@@ -32,9 +32,9 @@ export default function AddToTripModal({ courseId, courseName, courseLocation, o
 
     supabase
       .from('trip_members')
-      .select('trip_id, trips(id, name)')
+      .select('trip_id, trips(id, name, start_date)')
       .eq('user_id', user.id)
-      .eq('status', 'accepted')
+      .in('status', ['accepted', 'confirmed'])
       .then(({ data, error: err }) => {
         if (err) { setError('Could not load your trips.'); setLoading(false); return }
 

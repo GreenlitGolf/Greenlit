@@ -51,6 +51,11 @@ export default function CreateTripForm() {
   const [loading,   setLoading]   = useState(false)
   const [focused,   setFocused]   = useState<string | null>(null)
 
+  const today = new Date().toISOString().split('T')[0]
+  const startDateError = startDate && startDate < today ? 'Start date cannot be in the past.' : ''
+  const endDateError   = startDate && endDate && endDate < startDate ? 'End date must be after start date.' : ''
+  const hasDateErrors  = !!startDateError || !!endDateError
+
   function fieldStyle(id: string): React.CSSProperties {
     return focused === id ? { ...inputBase, ...inputFocus } : inputBase
   }
@@ -136,11 +141,20 @@ export default function CreateTripForm() {
             <input
               type="date"
               value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
+              min={today}
+              onChange={(e) => {
+                setStartDate(e.target.value)
+                if (endDate && e.target.value && endDate < e.target.value) setEndDate('')
+              }}
               onFocus={() => setFocused('start')}
               onBlur={() => setFocused(null)}
-              style={fieldStyle('start')}
+              style={{ ...fieldStyle('start'), borderColor: startDateError ? '#c0392b' : undefined }}
             />
+            {startDateError && (
+              <div style={{ fontSize: '12px', color: '#c0392b', marginTop: '4px', fontFamily: 'var(--font-sans)', fontWeight: 300 }}>
+                {startDateError}
+              </div>
+            )}
           </div>
           <div>
             <div
@@ -157,11 +171,18 @@ export default function CreateTripForm() {
             <input
               type="date"
               value={endDate}
+              min={startDate || today}
+              disabled={!startDate}
               onChange={(e) => setEndDate(e.target.value)}
               onFocus={() => setFocused('end')}
               onBlur={() => setFocused(null)}
-              style={fieldStyle('end')}
+              style={{ ...fieldStyle('end'), borderColor: endDateError ? '#c0392b' : undefined, opacity: !startDate ? 0.5 : 1 }}
             />
+            {endDateError && (
+              <div style={{ fontSize: '12px', color: '#c0392b', marginTop: '4px', fontFamily: 'var(--font-sans)', fontWeight: 300 }}>
+                {endDateError}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -225,20 +246,20 @@ export default function CreateTripForm() {
       {/* Submit */}
       <button
         type="submit"
-        disabled={loading || !name.trim()}
+        disabled={loading || !name.trim() || hasDateErrors}
         style={{
           width:         '100%',
           padding:       '15px 24px',
           borderRadius:  'var(--radius-md)',
-          background:    loading || !name.trim() ? 'var(--cream-dark)' : 'var(--green-deep)',
-          color:         loading || !name.trim() ? 'var(--text-light)' : 'var(--gold-light)',
+          background:    loading || !name.trim() || hasDateErrors ? 'var(--cream-dark)' : 'var(--green-deep)',
+          color:         loading || !name.trim() || hasDateErrors ? 'var(--text-light)' : 'var(--gold-light)',
           fontSize:      '13px',
           fontWeight:    600,
           letterSpacing: '0.08em',
           textTransform: 'uppercase',
           fontFamily:    'var(--font-sans)',
           border:        'none',
-          cursor:        loading || !name.trim() ? 'default' : 'pointer',
+          cursor:        loading || !name.trim() || hasDateErrors ? 'default' : 'pointer',
           transition:    'all 0.2s',
           marginTop:     '4px',
         }}

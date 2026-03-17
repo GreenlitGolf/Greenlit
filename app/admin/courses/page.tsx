@@ -98,6 +98,7 @@ export default function AdminCoursesPage() {
   const [resetLoading,  setResetLoading]  = useState(false)
   const [stuckLoading,  setStuckLoading]  = useState(false)
   const [deepResearch,  setDeepResearch]  = useState(false)
+  const [waitlistCount, setWaitlistCount] = useState<number | null>(null)
 
   // Initialize deep research toggle from localStorage
   useEffect(() => {
@@ -105,6 +106,12 @@ export default function AdminCoursesPage() {
       const stored = localStorage.getItem('greenlit-deep-research')
       if (stored === 'true') setDeepResearch(true)
     } catch { /* SSR or localStorage unavailable */ }
+  }, [])
+
+  // Fetch waitlist count
+  useEffect(() => {
+    supabase.from('waitlist').select('id', { count: 'exact', head: true })
+      .then(({ count }) => { if (count !== null) setWaitlistCount(count) })
   }, [])
 
   function toggleDeepResearch() {
@@ -305,9 +312,16 @@ export default function AdminCoursesPage() {
         <div style={{ fontFamily: 'var(--font-serif)', fontSize: '20px', color: 'var(--gold-light)', letterSpacing: '0.02em' }}>
           Greenlit
         </div>
-        <span style={{ fontSize: '11px', color: 'rgba(245,240,232,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
-          Admin
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {waitlistCount !== null && (
+            <span style={{ fontSize: '12px', color: 'var(--gold-light)', fontVariantNumeric: 'tabular-nums' }}>
+              {'\uD83D\uDCE7'} {waitlistCount.toLocaleString()} waitlist signup{waitlistCount !== 1 ? 's' : ''}
+            </span>
+          )}
+          <span style={{ fontSize: '11px', color: 'rgba(245,240,232,0.4)', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+            Admin
+          </span>
+        </div>
       </header>
 
       {/* Page header */}

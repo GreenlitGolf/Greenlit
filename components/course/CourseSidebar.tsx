@@ -130,7 +130,29 @@ export default function CourseSidebar({
               : 'Add this course to one of your trips.'}
           </div>
 
-          {tripId ? (
+          {!session ? (
+            // Not logged in
+            <a
+              href="/auth/login"
+              style={{
+                display:       'block',
+                width:         '100%',
+                padding:       '12px 20px',
+                background:    'rgba(255,255,255,0.1)',
+                color:         'rgba(245,240,232,0.6)',
+                border:        '1px solid rgba(255,255,255,0.15)',
+                borderRadius:  'var(--radius-sm)',
+                fontSize:      '12px',
+                fontWeight:    500,
+                letterSpacing: '0.05em',
+                textDecoration: 'none',
+                textAlign:     'center',
+                fontFamily:    'var(--font-sans)',
+              }}
+            >
+              Sign in to add to a trip
+            </a>
+          ) : tripId ? (
             // Direct add — we know exactly which trip
             <button
               onClick={handleDirectAdd}
