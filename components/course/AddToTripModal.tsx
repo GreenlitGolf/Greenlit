@@ -39,7 +39,9 @@ export default function AddToTripModal({ courseId, courseName, courseLocation, o
         if (err) { setError('Could not load your trips.'); setLoading(false); return }
 
         const loaded: Trip[] = (data ?? []).flatMap((row: any) => {
-          const t = row.trips
+          const raw = row.trips
+          // Supabase may return the joined row as an array or an object
+          const t = Array.isArray(raw) ? raw[0] : raw
           return t ? [{ id: t.id, name: t.name }] : []
         })
 
@@ -50,32 +52,34 @@ export default function AddToTripModal({ courseId, courseName, courseLocation, o
   }, [user])
 
   async function handleAdd() {
-    if (!selected || !user) return
+    if (!selected || !session?.access_token) return
     setSaving(true)
     setError(null)
 
-    const { error: insertErr } = await supabase
-      .from('trip_courses')
-      .upsert(
-        {
-          trip_id:         selected,
-          course_id:       courseId,
-          course_name:     courseName,
-          course_location: courseLocation,
-          added_by:        user.id,
+    try {
+      const res = await fetch(`/api/trips/${selected}/courses`, {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
         },
-        { onConflict: 'trip_id,course_id', ignoreDuplicates: true },
-      )
+        body: JSON.stringify({ courseId }),
+      })
 
-    if (insertErr) {
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setError(body.error || 'Failed to add course. Please try again.')
+        setSaving(false)
+        return
+      }
+
+      setSaved(true)
+      setSaving(false)
+      setTimeout(onClose, 1200)
+    } catch {
       setError('Failed to add course. Please try again.')
       setSaving(false)
-      return
     }
-
-    setSaved(true)
-    setSaving(false)
-    setTimeout(onClose, 1200)
   }
 
   return (
