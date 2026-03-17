@@ -26,29 +26,45 @@ export default function AddToTripModal({ courseId, courseName, courseLocation, o
   const [saved,      setSaved]      = useState(false)
   const [error,      setError]      = useState<string | null>(null)
 
-  // Load user's trips
+  // Load user's trips (two queries — no FK between trip_members and trips)
   useEffect(() => {
     if (!user) return
 
-    supabase
-      .from('trip_members')
-      .select('trip_id, trips(id, name, start_date)')
-      .eq('user_id', user.id)
-      .in('status', ['accepted', 'confirmed'])
-      .then(({ data, error: err }) => {
-        if (err) { setError('Could not load your trips.'); setLoading(false); return }
+    async function load() {
+      // 1. Get trip IDs from membership
+      const { data: members, error: memErr } = await supabase
+        .from('trip_members')
+        .select('trip_id')
+        .eq('user_id', user!.id)
+        .in('status', ['accepted', 'confirmed'])
 
-        const loaded: Trip[] = (data ?? []).flatMap((row: any) => {
-          const raw = row.trips
-          // Supabase may return the joined row as an array or an object
-          const t = Array.isArray(raw) ? raw[0] : raw
-          return t ? [{ id: t.id, name: t.name }] : []
-        })
-
-        setTrips(loaded)
-        if (loaded.length > 0) setSelected(loaded[0].id)
+      if (memErr || !members?.length) {
+        if (memErr) setError('Could not load your trips.')
         setLoading(false)
-      })
+        return
+      }
+
+      const tripIds = members.map((m: any) => m.trip_id)
+
+      // 2. Fetch trip details
+      const { data: tripRows, error: tripErr } = await supabase
+        .from('trips')
+        .select('id, name')
+        .in('id', tripIds)
+
+      if (tripErr) {
+        setError('Could not load your trips.')
+        setLoading(false)
+        return
+      }
+
+      const loaded: Trip[] = (tripRows ?? []).map((t: any) => ({ id: t.id, name: t.name }))
+      setTrips(loaded)
+      if (loaded.length > 0) setSelected(loaded[0].id)
+      setLoading(false)
+    }
+
+    load()
   }, [user])
 
   async function handleAdd() {
