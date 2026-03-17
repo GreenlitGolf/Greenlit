@@ -301,29 +301,27 @@ const itinInputStyle: React.CSSProperties = {
 function buildNavItems(memberCount: number): NavItem[] {
   return [
     { id: 'concierge',  icon: '✦',  label: 'Golf Concierge',   href: '' },
-    { id: 'courses',    icon: '🗺️', label: 'Course Directory',  href: '' },
     { id: 'tripcourses',icon: '⛳', label: 'Trip Courses',      href: '' },
     { id: 'itinerary',  icon: '📅', label: 'Trip Itinerary',    href: '' },
     { id: 'games',      icon: '🎲', label: 'Golf Games',        href: '' },
     { id: 'teetimes',   icon: '🕐', label: 'Tee Times',         href: '' },
-    { id: 'report',     icon: '📄', label: 'Trip Report',       href: '' },
     { id: 'hotels',     icon: '🏨', label: 'Accommodations',    href: '' },
     { id: 'group',      icon: '👥', label: 'Group & Members',   href: '', badge: memberCount > 0 ? memberCount : undefined },
     { id: 'budget',     icon: '💰', label: 'Budget Tracker',    href: '' },
+    { id: 'report',     icon: '📄', label: 'Trip Report',       href: '' },
   ]
 }
 
 const SECTION_LABELS: Record<string, string> = {
   concierge:   'Golf Concierge',
-  courses:     'Course Directory',
   tripcourses: 'Trip Courses',
   itinerary:   'Trip Itinerary',
   games:       'Golf Games',
   teetimes:    'Tee Times',
-  report:      'Trip Report',
   hotels:      'Accommodations',
   group:       'Group & Members',
   budget:      'Budget Tracker',
+  report:      'Trip Report',
 }
 
 // ─── Section: Golf Concierge ──────────────────────────────────────────────────
@@ -2459,7 +2457,6 @@ export default function TripPage() {
                 if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);      return }
                 if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }
                 if (navId === 'budget')   { router.push(`/trip/${id}/budget`);         return }
-                if (navId === 'courses')  { router.push(`/courses?tripId=${id}`);       return }
                 setEditing(false); setActiveNav(navId)
               }}
             tripName={trip.name}
