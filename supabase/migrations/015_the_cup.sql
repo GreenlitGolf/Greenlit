@@ -68,7 +68,7 @@ CREATE POLICY "Trip organizer can delete cups"
 CREATE TABLE IF NOT EXISTS cup_teams (
   id            UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
   cup_id        UUID           NOT NULL REFERENCES trip_cups(id) ON DELETE CASCADE,
-  member_id     UUID           NOT NULL REFERENCES trip_members(id) ON DELETE CASCADE,
+  member_id     BIGINT         NOT NULL REFERENCES trip_members(id) ON DELETE CASCADE,
   team          TEXT           NOT NULL CHECK (team IN ('a', 'b')),
   is_captain    BOOLEAN        DEFAULT FALSE,
   UNIQUE(cup_id, member_id)
@@ -189,10 +189,10 @@ CREATE POLICY "Trip organizer can delete cup sessions"
 CREATE TABLE IF NOT EXISTS cup_matches (
   id                 UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
   session_id         UUID           NOT NULL REFERENCES cup_sessions(id) ON DELETE CASCADE,
-  team_a_player1_id  UUID           REFERENCES trip_members(id) ON DELETE SET NULL,
-  team_a_player2_id  UUID           REFERENCES trip_members(id) ON DELETE SET NULL,
-  team_b_player1_id  UUID           REFERENCES trip_members(id) ON DELETE SET NULL,
-  team_b_player2_id  UUID           REFERENCES trip_members(id) ON DELETE SET NULL,
+  team_a_player1_id  BIGINT         REFERENCES trip_members(id) ON DELETE SET NULL,
+  team_a_player2_id  BIGINT         REFERENCES trip_members(id) ON DELETE SET NULL,
+  team_b_player1_id  BIGINT         REFERENCES trip_members(id) ON DELETE SET NULL,
+  team_b_player2_id  BIGINT         REFERENCES trip_members(id) ON DELETE SET NULL,
   result             TEXT           CHECK (result IN ('team_a', 'team_b', 'halved')),
   score_display      TEXT,
   team_a_points      DECIMAL(2,1)   DEFAULT 0,
