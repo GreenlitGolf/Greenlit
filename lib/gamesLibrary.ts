@@ -162,31 +162,6 @@ export const GAMES_LIBRARY: Record<string, GameDef> = {
 
   // ── Trip-Wide Formats ───────────────────────────────────────────────────────
 
-  ryderCup: {
-    name: 'Ryder Cup',
-    category: 'trip_format',
-    minPlayers: 4,
-    maxPlayers: 24,
-    description:
-      'Divide the group into 2 teams for the full trip. Each round earns points: Foursomes (alternate shot), Four-Ball (better ball), and Singles matches. Team with most points wins.',
-    configFields: ['teamNames', 'sessionFormat', 'pointsPerSession'],
-    idealFor: 'Groups of 6-12. The ultimate multi-day competition format — creates storylines that last for years.',
-    difficulty: 'medium',
-    sessions: ['foursomes', 'fourball', 'singles'],
-  },
-
-  presidents_cup: {
-    name: 'Presidents Cup',
-    category: 'trip_format',
-    minPlayers: 6,
-    maxPlayers: 20,
-    description:
-      'Similar to Ryder Cup but with more flexibility. Mixed foursomes, four-ball, and singles across multiple rounds. Works well for trips with uneven team sizes.',
-    configFields: ['teamNames', 'pointsStructure'],
-    idealFor: 'Larger groups (8+). More flexible than Ryder Cup for odd-numbered groups.',
-    difficulty: 'medium',
-  },
-
   strokeplayTournament: {
     name: 'Stroke Play Tournament',
     category: 'trip_format',

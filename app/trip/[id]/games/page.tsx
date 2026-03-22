@@ -15,6 +15,7 @@ import {
   type GameDef,
   type GameCategory,
 } from '@/lib/gamesLibrary'
+import TheCup from './TheCup'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -870,6 +871,7 @@ export default function GamesPage() {
   const [payouts, setPayouts]       = useState<Payout[]>([])
   const [showDrawer, setShowDrawer] = useState(false)
   const [activeTab, setActiveTab]   = useState('overview')
+  const [mainTab, setMainTab]       = useState<'games' | 'ai' | 'cup'>('games')
 
   // AI suggestions
   const [suggestions, setSuggestions]       = useState<AISuggestion[]>([])
@@ -1076,104 +1078,89 @@ export default function GamesPage() {
                 padding: '22px 48px 0', flexShrink: 0,
               }}>
                 <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#111827', margin: 0 }}>
-                  🎲 Golf Games
+                  Golf Games
                 </h2>
-                {hasGames && (
+                {mainTab === 'games' && hasGames && (
                   <button onClick={() => setShowDrawer(true)} style={BTN_GOLD}>
                     + Add Game
                   </button>
                 )}
               </div>
 
-              {/* Tab row */}
-              {hasGames && tabs.length > 1 && (
-                <div style={{
-                  display: 'flex', gap: 0, padding: '16px 48px 0',
-                  borderBottom: '1px solid #e5e7eb', flexShrink: 0,
-                }}>
-                  {tabs.map(tab => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setActiveTab(tab.id)}
-                      style={{
-                        padding: '10px 20px', fontSize: '13px', fontWeight: 500,
-                        border: 'none', borderBottom: activeTab === tab.id ? '2px solid var(--gold)' : '2px solid transparent',
-                        background: 'transparent', cursor: 'pointer',
-                        color: activeTab === tab.id ? 'var(--gold)' : '#6b7280',
-                        fontFamily: 'var(--font-sans)',
-                        transition: 'color 0.15s, border-color 0.15s',
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {/* Main tab row — always visible */}
+              <div style={{
+                display: 'flex', gap: 0, padding: '16px 48px 0',
+                borderBottom: '1px solid #e5e7eb', flexShrink: 0,
+              }}>
+                {([
+                  { id: 'games' as const, icon: '🎲', label: 'Games' },
+                  { id: 'ai'    as const, icon: '✦',  label: 'AI Suggest' },
+                  { id: 'cup'   as const, icon: '🏆', label: 'The Cup' },
+                ]).map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setMainTab(tab.id)}
+                    style={{
+                      padding: '10px 20px', fontSize: '13px', fontWeight: 500,
+                      border: 'none', borderBottom: mainTab === tab.id ? '2px solid var(--gold)' : '2px solid transparent',
+                      background: 'transparent', cursor: 'pointer',
+                      color: mainTab === tab.id ? 'var(--gold)' : '#6b7280',
+                      fontFamily: 'var(--font-sans)',
+                      transition: 'color 0.15s, border-color 0.15s',
+                      display: 'flex', alignItems: 'center', gap: 6,
+                    }}
+                  >
+                    <span style={{ fontSize: '14px' }}>{tab.icon}</span> {tab.label}
+                  </button>
+                ))}
+              </div>
 
               {/* Content area */}
               <div style={{ flex: 1, overflowY: 'auto', padding: '24px 48px 48px' }}>
-                {/* Empty state */}
-                {!hasGames && suggestions.length === 0 && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, maxWidth: 800 }}>
-                    {/* Set Up Card */}
-                    <div style={CARD}>
-                      <div style={{ padding: '32px 28px', textAlign: 'center' }}>
-                        <div style={{ fontSize: '36px', marginBottom: 12 }}>🎲</div>
+
+                {/* ═══ GAMES TAB ═══ */}
+                {mainTab === 'games' && (
+                  <>
+                    {/* Empty state */}
+                    {!hasGames && suggestions.length === 0 && (
+                      <div style={{ textAlign: 'center', padding: '48px 32px', maxWidth: 480, margin: '0 auto' }}>
+                        <div style={{ fontSize: '48px', marginBottom: 12 }}>🎲</div>
                         <div style={{ fontWeight: 700, fontSize: '17px', color: '#111827', marginBottom: 6 }}>
                           Set Up Your Games
                         </div>
                         <div style={{ fontSize: '13px', color: '#9ca3af', lineHeight: 1.6, marginBottom: 20 }}>
-                          Choose from skins, Nassau, scrambles, Ryder Cup formats and more.
+                          Choose from skins, Nassau, scrambles, and more.
                           Configure stakes, pairings, and track scores all in one place.
                         </div>
                         <button onClick={() => setShowDrawer(true)} style={BTN_GOLD}>
                           + Add Game
                         </button>
                       </div>
-                    </div>
+                    )}
 
-                    {/* AI Suggest Card */}
-                    <div style={CARD}>
-                      <div style={{ padding: '32px 28px', textAlign: 'center' }}>
-                        <div style={{ fontSize: '36px', marginBottom: 12 }}>✦</div>
-                        <div style={{ fontWeight: 700, fontSize: '17px', color: '#111827', marginBottom: 6 }}>
-                          Let AI Suggest Games
-                        </div>
-                        <div style={{ fontSize: '13px', color: '#9ca3af', lineHeight: 1.6, marginBottom: 20 }}>
-                          Based on your group size, handicaps, and trip schedule,
-                          we&apos;ll recommend the perfect game combination.
-                        </div>
-                        <button
-                          onClick={handleSuggestGames}
-                          disabled={suggestLoading}
-                          style={{
-                            ...BTN_OUTLINE,
-                            opacity: suggestLoading ? 0.6 : 1,
-                          }}
-                        >
-                          {suggestLoading ? 'Thinking…' : '✦ Suggest Games for Our Group'}
-                        </button>
+                    {/* Sub-tab row for rounds */}
+                    {hasGames && tabs.length > 1 && (
+                      <div style={{
+                        display: 'flex', gap: 0, marginBottom: 20,
+                        borderBottom: '1px solid #f3f4f6',
+                      }}>
+                        {tabs.map(tab => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id)}
+                            style={{
+                              padding: '8px 16px', fontSize: '12px', fontWeight: 500,
+                              border: 'none', borderBottom: activeTab === tab.id ? '2px solid var(--green-deep, #1a2e1a)' : '2px solid transparent',
+                              background: 'transparent', cursor: 'pointer',
+                              color: activeTab === tab.id ? '#111827' : '#9ca3af',
+                              fontFamily: 'var(--font-sans)',
+                            }}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
                       </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* AI Suggestions */}
-                {suggestions.length > 0 && (
-                  <div style={{ marginBottom: 32 }}>
-                    <div style={{
-                      fontSize: '14px', fontWeight: 700, color: '#111827', marginBottom: 12,
-                      display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
-                      <span style={{ color: 'var(--gold)' }}>✦</span> AI Suggestions
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
-                      {suggestions.map((s, i) => (
-                        <SuggestionCard key={i} suggestion={s} onAccept={handleAcceptSuggestion} />
-                      ))}
-                    </div>
-                  </div>
-                )}
+                    )}
 
                 {/* Overview tab */}
                 {hasGames && activeTab === 'overview' && (
@@ -1414,6 +1401,71 @@ export default function GamesPage() {
                     </div>
                   )
                 })()}
+                  </>
+                )}
+
+                {/* ═══ AI SUGGEST TAB ═══ */}
+                {mainTab === 'ai' && (
+                  <div>
+                    {suggestions.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '48px 32px', maxWidth: 480, margin: '0 auto' }}>
+                        <div style={{ fontSize: '48px', marginBottom: 12 }}>✦</div>
+                        <div style={{ fontWeight: 700, fontSize: '17px', color: '#111827', marginBottom: 6 }}>
+                          AI Game Suggestions
+                        </div>
+                        <div style={{ fontSize: '13px', color: '#9ca3af', lineHeight: 1.6, marginBottom: 20 }}>
+                          Based on your group size, handicaps, and trip schedule,
+                          we&apos;ll recommend the perfect game combination.
+                        </div>
+                        <button
+                          onClick={handleSuggestGames}
+                          disabled={suggestLoading}
+                          style={{
+                            ...BTN_GOLD,
+                            opacity: suggestLoading ? 0.6 : 1,
+                          }}
+                        >
+                          {suggestLoading ? 'Thinking…' : '✦ Suggest Games for Our Group'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <div style={{
+                          fontSize: '14px', fontWeight: 700, color: '#111827', marginBottom: 12,
+                          display: 'flex', alignItems: 'center', gap: 8,
+                        }}>
+                          <span style={{ color: 'var(--gold)' }}>✦</span> AI Suggestions
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+                          {suggestions.map((s, i) => (
+                            <SuggestionCard key={i} suggestion={s} onAccept={handleAcceptSuggestion} />
+                          ))}
+                        </div>
+                        <div style={{ marginTop: 16 }}>
+                          <button
+                            onClick={handleSuggestGames}
+                            disabled={suggestLoading}
+                            style={{ ...BTN_OUTLINE, fontSize: '12px', padding: '7px 14px' }}
+                          >
+                            {suggestLoading ? 'Thinking…' : 'Refresh Suggestions'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ═══ THE CUP TAB ═══ */}
+                {mainTab === 'cup' && trip && (
+                  <TheCup
+                    tripId={id}
+                    tripName={trip.name}
+                    members={members}
+                    teeTimes={teeTimes}
+                    isOrganizer={isOrganizer}
+                  />
+                )}
+
               </div>
             </>
           )}

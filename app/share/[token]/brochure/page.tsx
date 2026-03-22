@@ -289,6 +289,7 @@ export default async function BrochurePage({
     { data: teeTimesRaw },
     { data: accommodationsRaw },
     { data: budgetItemsRaw },
+    { data: cupRaw },
   ] = await Promise.all([
     supabase.from('trip_members').select('id, trip_id, user_id, display_name, role').eq('trip_id', trip.id),
     supabase.from('itinerary_items').select('id, day_number, start_time, title, type, course_id').eq('trip_id', trip.id),
@@ -306,6 +307,7 @@ export default async function BrochurePage({
     supabase.from('tee_times').select('*').eq('trip_id', trip.id).order('tee_date').order('tee_time'),
     supabase.from('accommodations').select('*').eq('trip_id', trip.id).order('check_in_date'),
     supabase.from('budget_items').select('*').eq('trip_id', trip.id),
+    supabase.from('trip_cups').select('name, team_a_name, team_b_name, team_a_color, team_b_color, status').eq('trip_id', trip.id).maybeSingle(),
   ])
 
   const members = (membersRaw || []) as unknown as TripMember[]
@@ -313,6 +315,31 @@ export default async function BrochurePage({
   const teeTimes: TeeTime[] = (teeTimesRaw || []) as TeeTime[]
   const accommodations: Accommodation[] = (accommodationsRaw || []) as Accommodation[]
   const budgetItems: BudgetItem[] = (budgetItemsRaw || []) as BudgetItem[]
+
+  // Cup data
+  const cup = cupRaw as { name: string; team_a_name: string; team_b_name: string; team_a_color: string; team_b_color: string; status: string } | null
+  let cupScoreA = 0
+  let cupScoreB = 0
+  if (cup && cup.status !== 'setup') {
+    const { data: cupFull } = await supabase
+      .from('trip_cups').select('id').eq('trip_id', trip.id).single()
+    if (cupFull) {
+      const { data: sessIds } = await supabase
+        .from('cup_sessions').select('id').eq('cup_id', cupFull.id)
+      if (sessIds && sessIds.length > 0) {
+        const { data: matches } = await supabase
+          .from('cup_matches')
+          .select('team_a_points, team_b_points')
+          .in('session_id', sessIds.map((s: { id: string }) => s.id))
+        if (matches) {
+          for (const m of matches) {
+            cupScoreA += Number(m.team_a_points ?? 0)
+            cupScoreB += Number(m.team_b_points ?? 0)
+          }
+        }
+      }
+    }
+  }
 
   // Sort items
   const items = (rawItems || []).sort((a, b) => {
@@ -829,6 +856,47 @@ export default async function BrochurePage({
             }}>
               Costs are estimates and subject to change.
             </p>
+          </div>
+        </section>
+      )}
+
+      {/* ── Section: The Cup ── */}
+      {cup && cup.status !== 'setup' && (
+        <section style={{ padding: '56px 48px', background: 'var(--cream)' }}>
+          <div style={{ maxWidth: '720px', margin: '0 auto', textAlign: 'center' }}>
+            <div style={{ fontSize: '12px', color: 'var(--gold)', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '8px' }}>
+              🏆 The Cup
+            </div>
+            <h2 style={{
+              fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '32px',
+              fontWeight: 700, color: 'var(--green-deep)', margin: '0 0 24px',
+            }}>
+              {cup.name}
+            </h2>
+
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px',
+              padding: '24px 32px', borderRadius: '12px',
+              background: '#fff', border: '1px solid #e5e7eb',
+            }}>
+              <div style={{ textAlign: 'right', flex: 1 }}>
+                <div style={{ fontSize: '15px', fontWeight: 600, color: cup.team_a_color }}>{cup.team_a_name}</div>
+                <div style={{ width: '36px', height: '4px', borderRadius: '2px', background: cup.team_a_color, marginLeft: 'auto', marginTop: '6px' }} />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
+                <span style={{ fontSize: '48px', fontWeight: 700, fontFamily: 'var(--font-serif)', color: cup.team_a_color }}>
+                  {cupScoreA % 1 === 0 ? cupScoreA : cupScoreA.toFixed(1)}
+                </span>
+                <span style={{ fontSize: '24px', color: '#d1d5db', fontWeight: 300 }}>—</span>
+                <span style={{ fontSize: '48px', fontWeight: 700, fontFamily: 'var(--font-serif)', color: cup.team_b_color }}>
+                  {cupScoreB % 1 === 0 ? cupScoreB : cupScoreB.toFixed(1)}
+                </span>
+              </div>
+              <div style={{ textAlign: 'left', flex: 1 }}>
+                <div style={{ fontSize: '15px', fontWeight: 600, color: cup.team_b_color }}>{cup.team_b_name}</div>
+                <div style={{ width: '36px', height: '4px', borderRadius: '2px', background: cup.team_b_color, marginTop: '6px' }} />
+              </div>
+            </div>
           </div>
         </section>
       )}

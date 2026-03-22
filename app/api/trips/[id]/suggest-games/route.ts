@@ -52,14 +52,14 @@ Existing games already set up: ${existingGames.map(g => `${g.game_type} (Round $
 Return a JSON array of suggestions:
 [{
   "round": "Round 1 / Whole Trip / etc",
-  "game": "game_type_key from: skins, nassau, stableford, matchPlay, wolf, bingoBangoBongo, vegas, sixSixSix, banker, scramble, chapman, alternateShot, ryderCup, presidents_cup, strokeplayTournament, stablefordTournament, junk",
+  "game": "game_type_key from: skins, nassau, stableford, matchPlay, wolf, bingoBangoBongo, vegas, sixSixSix, banker, scramble, chapman, alternateShot, strokeplayTournament, stablefordTournament, junk",
   "reason": "One sentence why this works for this specific group",
   "suggestedStakes": "$X per skin / $Y Nassau / etc",
   "config": { ...default config values }
 }]
 
 Rules:
-- Suggest a trip-wide format if 3+ rounds (Ryder Cup for even teams, Stableford Points Race for mixed ability)
+- Suggest a trip-wide format if 3+ rounds (Stroke Play Tournament or Stableford Points Race)
 - Suggest Skins + Nassau combo for the first round as a warm-up
 - If wide handicap spread (10+ shots between best and worst), prefer net games and Stableford
 - If tight handicap spread, suggest gross games

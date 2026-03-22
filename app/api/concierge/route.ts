@@ -16,6 +16,9 @@ export interface TripContext {
   startDate?:     string
   endDate?:       string
   addedCourses?:  string[]
+  cupName?:       string
+  cupTeams?:      string   // e.g. "Team Birdie (4 players) vs Team Eagle (4 players)"
+  cupFormats?:    string   // e.g. "Round 1: Four-Ball, Round 2: Singles"
 }
 
 export interface MatchedCourse {
@@ -171,6 +174,12 @@ function buildSystemPrompt(ctx?: TripContext, dbCourses?: CourseRow[]): string {
       lines.push(`Travel until: ${ctx.endDate}`)
     if (ctx.addedCourses && ctx.addedCourses.length > 0)
       lines.push(`Courses already on the itinerary: ${ctx.addedCourses.join(', ')} — avoid recommending these again unless asked.`)
+    if (ctx.cupName) {
+      lines.push(`The Cup competition: "${ctx.cupName}" is set up for this trip.`)
+      if (ctx.cupTeams) lines.push(`Teams: ${ctx.cupTeams}`)
+      if (ctx.cupFormats) lines.push(`Session formats: ${ctx.cupFormats}`)
+      lines.push(`Consider The Cup when suggesting course strategies, team dynamics, and game format recommendations.`)
+    }
 
     if (lines.length > 0) {
       parts.push(`\n--- CURRENT TRIP CONTEXT (use automatically, do not ask user to repeat) ---\n${lines.join('\n')}\n---`)

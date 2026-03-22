@@ -116,6 +116,7 @@ export default async function ShareQuickView({
     { data: teeTimesRaw },
     { data: accommodationsRaw },
     { data: budgetItemsRaw },
+    { data: cupRaw },
   ] = await Promise.all([
     supabase.from('trip_members').select('*', { count: 'exact', head: true }).eq('trip_id', trip.id),
     supabase.from('itinerary_items').select('id, day_number, start_time, title, type').eq('trip_id', trip.id),
@@ -123,6 +124,7 @@ export default async function ShareQuickView({
     supabase.from('tee_times').select('id, course_name, tee_date, tee_time, num_players, confirmation_number, green_fee_per_player').eq('trip_id', trip.id).order('tee_date').order('tee_time'),
     supabase.from('accommodations').select('id, name, check_in_date, check_out_date, confirmation_number').eq('trip_id', trip.id).order('check_in_date'),
     supabase.from('budget_items').select('amount, per_person').eq('trip_id', trip.id),
+    supabase.from('trip_cups').select('name, team_a_name, team_b_name, team_a_color, team_b_color, status').eq('trip_id', trip.id).maybeSingle(),
   ])
 
   const items: RawItem[] = (rawItems || []).sort((a, b) => {
@@ -144,6 +146,36 @@ export default async function ShareQuickView({
     totalCost += bi.per_person ? bi.amount * members : bi.amount
   }
   const perPersonCost = members > 0 ? Math.round(totalCost / members) : 0
+
+  // Cup data — fetch scores if cup exists
+  let cupScoreA = 0
+  let cupScoreB = 0
+  const cup = cupRaw as { name: string; team_a_name: string; team_b_name: string; team_a_color: string; team_b_color: string; status: string } | null
+
+  if (cup && cup.status !== 'setup') {
+    // Fetch cup sessions and matches via the cup id
+    const { data: cupFull } = await supabase
+      .from('trip_cups')
+      .select('id')
+      .eq('trip_id', trip.id)
+      .single()
+
+    if (cupFull) {
+      const { data: matches } = await supabase
+        .from('cup_matches')
+        .select('team_a_points, team_b_points, session_id')
+        .in('session_id', (
+          await supabase.from('cup_sessions').select('id').eq('cup_id', cupFull.id)
+        ).data?.map((s: { id: string }) => s.id) ?? [])
+
+      if (matches) {
+        for (const m of matches) {
+          cupScoreA += Number(m.team_a_points ?? 0)
+          cupScoreB += Number(m.team_b_points ?? 0)
+        }
+      }
+    }
+  }
 
   // Group tee times by date for quick lookup
   const teeTimesByDate: Record<string, TeeTime[]> = {}
@@ -335,6 +367,47 @@ export default async function ShareQuickView({
               <span>Estimated cost</span>
               <span style={{ color: 'var(--text-light)', fontWeight: 300 }}>·</span>
               <span style={{ fontWeight: 600 }}>${perPersonCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} per person</span>
+            </div>
+          )}
+
+          {/* ── The Cup ── */}
+          {cup && cup.status !== 'setup' && (
+            <div style={{ marginTop: '36px' }}>
+              <div style={{
+                fontSize: '14px', fontWeight: 700, fontFamily: 'var(--font-serif)',
+                fontStyle: 'italic', color: 'var(--green-deep)', marginBottom: '12px',
+                display: 'flex', alignItems: 'center', gap: '8px',
+              }}>
+                <span>🏆</span>
+                <span>{cup.name}</span>
+              </div>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '16px',
+                padding: '16px 20px', borderRadius: '10px',
+                background: '#fff', border: '1px solid #e5e7eb',
+              }}>
+                <div style={{ textAlign: 'right', flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: cup.team_a_color }}>
+                    {cup.team_a_name}
+                  </div>
+                  <div style={{ width: '28px', height: '3px', borderRadius: '2px', background: cup.team_a_color, marginLeft: 'auto', marginTop: '3px' }} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+                  <span style={{ fontSize: '28px', fontWeight: 700, fontFamily: 'var(--font-serif)', color: cup.team_a_color }}>
+                    {cupScoreA % 1 === 0 ? cupScoreA : cupScoreA.toFixed(1)}
+                  </span>
+                  <span style={{ fontSize: '16px', color: '#d1d5db', fontWeight: 300 }}>—</span>
+                  <span style={{ fontSize: '28px', fontWeight: 700, fontFamily: 'var(--font-serif)', color: cup.team_b_color }}>
+                    {cupScoreB % 1 === 0 ? cupScoreB : cupScoreB.toFixed(1)}
+                  </span>
+                </div>
+                <div style={{ textAlign: 'left', flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: cup.team_b_color }}>
+                    {cup.team_b_name}
+                  </div>
+                  <div style={{ width: '28px', height: '3px', borderRadius: '2px', background: cup.team_b_color, marginTop: '3px' }} />
+                </div>
+              </div>
             </div>
           )}
 
