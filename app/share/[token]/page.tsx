@@ -103,6 +103,11 @@ function fmtDateShort(dateStr: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+/** Strip " - Round N" suffix from tee time titles */
+function stripRoundSuffix(title: string): string {
+  return title.replace(/\s*[-–—]\s*Round\s*\d+$/i, '').trim()
+}
+
 function formatLabel(f: string): string {
   const map: Record<string, string> = {
     four_ball: 'Four-Ball', foursomes: 'Foursomes', singles: 'Singles', scramble: 'Scramble',
@@ -369,7 +374,7 @@ export default async function ShareQuickView({
                               </span>
                             )}
                             {!item.start_time && item.type !== 'tee_time' && <span style={{ minWidth: '62px' }} />}
-                            <span>{item.title}</span>
+                            <span>{item.type === 'tee_time' ? stripRoundSuffix(item.title) : item.title}</span>
                           </div>
                         )) : (
                           <span style={{ fontSize: '13px', color: 'var(--text-light)', fontStyle: 'italic', fontWeight: 300 }}>No items planned yet.</span>

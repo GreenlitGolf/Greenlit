@@ -196,7 +196,12 @@ function fmtTimeRange(earliest: string, latest: string): string {
   return `${e} – ${l}`
 }
 
-// Display-item types for day-by-day rendering (Fix 2)
+/** Strip " - Round N" or " – Round N" suffix from tee time titles */
+function stripRoundSuffix(title: string): string {
+  return title.replace(/\s*[-–—]\s*Round\s*\d+$/i, '').trim()
+}
+
+// Display-item types for day-by-day rendering
 type DisplayItem =
   | { kind: 'regular'; id: string; start_time: string | null; title: string; type: string }
   | { kind: 'grouped_tee'; key: string; earliestTime: string; courseName: string; groupCount: number; playersPerGroup: number }
@@ -233,13 +238,13 @@ function buildDisplayItems(
       } else break
     }
     if (batch.length === 1) {
-      result.push({ kind: 'regular', ...item })
+      result.push({ kind: 'regular', ...item, title: item.type === 'tee_time' ? stripRoundSuffix(item.title) : item.title })
     } else {
       result.push({
         kind: 'grouped_tee',
         key: `grp-${item.id}`,
         earliestTime: item.start_time,
-        courseName: item.title,
+        courseName: stripRoundSuffix(item.title),
         groupCount: batch.length,
         playersPerGroup: 4, // standard foursome
       })
