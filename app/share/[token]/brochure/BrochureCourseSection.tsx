@@ -80,12 +80,6 @@ function firstParaTruncated(text: string | null, maxWords = 150): { short: strin
   return { short: words.slice(0, maxWords).join(' ') + '\u2026', full: text, truncated: true }
 }
 
-// Best Season: first 120 chars max
-function truncateSeason(text: string | null): string {
-  if (!text) return 'Year-round'
-  if (text.length <= 120) return text
-  return text.slice(0, 120).trimEnd() + '\u2026'
-}
 
 // Also on Property phrase: max 60 chars
 function truncatePhrase(desc: string | undefined): string {
@@ -126,7 +120,6 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
     : null
 
   const { short: descShort, full: descFull, truncated: descTruncated } = firstParaTruncated(course.description)
-  const bestSeason   = truncateSeason(course.best_time_to_visit)
   // Defensive: lodging_on_property should be a short name; if it's long (data error), it's the description
   const lodgingName  = (course.lodging_on_property && course.lodging_on_property.length < 80)
     ? course.lodging_on_property
@@ -209,7 +202,6 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
             ['Green Fees',  priceLabel || 'Contact'],
             ['Walking',     course.walking_friendly ? '✓ Friendly' : 'Cart required'],
             ['Caddies',     course.caddie_available ? '✓ Available' : 'Not available'],
-            ['Best Season', bestSeason],
           ].map(([label, value], i, arr) => (
             <div key={label} style={{
               padding: '14px 16px',
