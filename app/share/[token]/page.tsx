@@ -291,7 +291,7 @@ export default async function ShareQuickView({
       />
 
       <div style={{ minHeight: '100vh', background: '#fff', fontFamily: 'var(--font-sans)' }}>
-        <div style={{ maxWidth: '760px', margin: '0 auto', padding: '56px 40px 80px' }}>
+        <div className="qv-container" style={{ maxWidth: '760px', margin: '0 auto', padding: '56px 40px 80px' }}>
 
           {/* ── Header ── */}
           <div style={{ marginBottom: '44px' }}>
@@ -302,7 +302,7 @@ export default async function ShareQuickView({
               }}>
                 Greenlit
               </div>
-              <div className="no-print" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div className="no-print qv-view-toggle" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <div style={{ display: 'flex', border: '1px solid var(--cream-dark)', borderRadius: '8px', overflow: 'hidden' }}>
                   <span style={{ padding: '6px 14px', fontSize: '12px', fontWeight: 600, background: 'var(--green-deep)', color: 'var(--gold-light)' }}>
                     Quick View
@@ -317,7 +317,7 @@ export default async function ShareQuickView({
               </div>
             </div>
 
-            <h1 style={{
+            <h1 className="qv-title" style={{
               fontFamily: 'var(--font-serif)', fontSize: '42px', fontWeight: 700,
               color: 'var(--green-deep)', lineHeight: 1.15, marginBottom: '10px',
             }}>
@@ -466,13 +466,13 @@ export default async function ShareQuickView({
               </div>
 
               {/* Team rosters — structured two-column grid */}
-              <div style={{
+              <div className="qv-cup-teams" style={{
                 display: 'grid', gridTemplateColumns: '1fr 1fr',
                 borderRadius: '10px', overflow: 'hidden',
                 border: '1px solid #e5e7eb', marginBottom: '12px',
               }}>
                 {/* Team A */}
-                <div style={{ padding: '14px 16px', borderRight: '1px solid #e5e7eb' }}>
+                <div className="qv-cup-team-a" style={{ padding: '14px 16px', borderRight: '1px solid #e5e7eb' }}>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: cup.team_a_color, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     {cup.team_a_name}
                     <span style={{ display: 'inline-block', width: '16px', height: '3px', borderRadius: '2px', background: cup.team_a_color }} />
@@ -615,6 +615,19 @@ export default async function ShareQuickView({
           body { margin: 0; background: white; }
           @page { margin: 0.75in; size: letter; }
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+        @media (max-width: 640px) {
+          /* Main container — tighter padding on mobile */
+          .qv-container { padding: 32px 16px 48px !important; }
+          /* Title scales down */
+          .qv-title { font-size: 28px !important; }
+          /* Cup team roster — stack single column */
+          .qv-cup-teams { grid-template-columns: 1fr !important; }
+          .qv-cup-team-a { border-right: none !important; border-bottom: 1px solid #e5e7eb !important; }
+          /* Toggle buttons  */
+          .qv-view-toggle { gap: 4px !important; }
+          .qv-view-toggle span,
+          .qv-view-toggle a { padding: 6px 10px !important; font-size: 11px !important; }
         }
       `}</style>
     </>

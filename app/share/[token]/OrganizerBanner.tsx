@@ -247,8 +247,8 @@ export default function OrganizerBanner({
 
       {/* ── Customize drawer ── */}
       {customizeOpen && (
-        <div style={{
-          position: 'fixed', top: 0, right: 0, bottom: 0, width: '420px',
+        <div className="customize-drawer" style={{
+          position: 'fixed', top: 0, right: 0, bottom: 0, width: '420px', maxWidth: '100vw',
           background: 'var(--white)', zIndex: 101, display: 'flex', flexDirection: 'column',
           boxShadow: '-4px 0 32px rgba(0,0,0,0.15)',
           animation: 'slideInRight 0.22s ease',
@@ -418,11 +418,11 @@ export default function OrganizerBanner({
 
       {/* ── Share popover ── */}
       {shareOpen && (
-        <div style={{
+        <div className="share-popover" style={{
           position: 'fixed', top: '52px', right: '24px',
           background: 'var(--white)', border: '1px solid var(--cream-dark)',
           borderRadius: '12px', boxShadow: '0 8px 32px rgba(0,0,0,0.14)',
-          padding: '20px', width: '320px', zIndex: 101,
+          padding: '20px', width: '320px', maxWidth: 'calc(100vw - 32px)', zIndex: 101,
           animation: 'fadeInDown 0.15s ease',
         }}>
           <div style={{ fontFamily: 'var(--font-serif)', fontSize: '16px', color: 'var(--green-deep)', fontWeight: 600, marginBottom: '16px' }}>
@@ -475,6 +475,8 @@ export default function OrganizerBanner({
           .organizer-banner-text { display: none !important; }
           .organizer-banner-buttons { display: flex !important; gap: 8px !important; }
           .organizer-banner-buttons button { flex: 1 !important; min-height: 44px !important; font-size: 13px !important; }
+          .customize-drawer { width: 100vw !important; }
+          .share-popover { right: 16px !important; left: 16px !important; width: auto !important; }
         }
       `}</style>
     </>

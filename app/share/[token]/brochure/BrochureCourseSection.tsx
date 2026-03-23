@@ -164,7 +164,7 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
       </div>
 
       {/* Content */}
-      <div style={{ maxWidth: '760px', margin: '0 auto', padding: '48px 48px 0' }}>
+      <div className="br-course-inner" style={{ maxWidth: '760px', margin: '0 auto', padding: '48px 48px 0' }}>
 
         {/* Course name */}
         <h2 style={{

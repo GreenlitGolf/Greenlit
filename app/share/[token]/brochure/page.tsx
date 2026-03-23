@@ -933,7 +933,7 @@ export default async function BrochurePage({
           return null
         }
         return (
-        <section style={{ padding: '56px 48px', background: 'var(--cream)' }}>
+        <section className="br-cup-section" style={{ padding: '56px 48px', background: 'var(--cream)' }}>
           <div style={{ maxWidth: '720px', margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: '28px' }}>
               <div style={{ fontSize: '12px', color: 'var(--gold)', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '8px' }}>
@@ -948,13 +948,13 @@ export default async function BrochurePage({
             </div>
 
             {/* Team rosters — structured two-column grid */}
-            <div style={{
+            <div className="br-cup-teams" style={{
               display: 'grid', gridTemplateColumns: '1fr 1fr',
               borderRadius: '12px', overflow: 'hidden',
               border: '1px solid #e5e7eb', marginBottom: '24px', background: '#fff',
             }}>
               {/* Team A */}
-              <div style={{ padding: '20px 24px', borderRight: '1px solid #e5e7eb' }}>
+              <div className="br-cup-team-a" style={{ padding: '20px 24px', borderRight: '1px solid #e5e7eb' }}>
                 <div style={{ fontSize: '14px', fontWeight: 600, color: cup.team_a_color, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {cup.team_a_name}
                   <span style={{ display: 'inline-block', width: '20px', height: '3px', borderRadius: '2px', background: cup.team_a_color }} />
@@ -1095,7 +1095,7 @@ export default async function BrochurePage({
       })()}
 
       {/* ── Section: Footer ── */}
-      <footer style={{ background: 'var(--green-deep)', padding: '56px 48px', textAlign: 'center' }}>
+      <footer className="br-footer" style={{ background: 'var(--green-deep)', padding: '56px 48px', textAlign: 'center' }}>
         <div style={{ fontFamily: 'var(--font-serif)', fontSize: '28px', color: 'var(--gold-light)', fontWeight: 600, marginBottom: '8px' }}>
           Planned with Greenlit
         </div>
@@ -1122,6 +1122,24 @@ export default async function BrochurePage({
           .tee-sheet-section { page-break-before: always; }
           .budget-section { page-break-before: always; }
           .photo-strip { grid-template-columns: repeat(2, 1fr) !important; }
+        }
+        @media (max-width: 640px) {
+          /* Section inner padding — shrink from 48px to 16px */
+          section > div[style*="padding: 0 48px"],
+          section > div[style*="padding"] {
+            padding-left: 16px !important;
+            padding-right: 16px !important;
+          }
+          /* Cup section padding */
+          .br-cup-section { padding: 36px 16px !important; }
+          /* Cup team roster — stack single column */
+          .br-cup-teams { grid-template-columns: 1fr !important; }
+          .br-cup-team-a { border-right: none !important; border-bottom: 1px solid #e5e7eb !important; }
+          /* Footer padding */
+          .br-footer { padding: 36px 16px !important; }
+          .br-footer h3 { font-size: 22px !important; }
+          /* Course inner padding */
+          .br-course-inner { padding: 32px 16px 0 !important; }
         }
       `}</style>
       <script dangerouslySetInnerHTML={{ __html: `
