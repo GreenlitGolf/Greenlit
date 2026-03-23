@@ -154,7 +154,7 @@ export const GAMES_LIBRARY: Record<string, GameDef> = {
     minPlayers: 4,
     maxPlayers: 4,
     description:
-      'Team of 2 alternates every shot. One player tees off on odd holes, partner on even holes. The Ryder Cup format — brutal on partnerships.',
+      'Team of 2 alternates every shot. One player tees off on odd holes, partner on even holes. Brutal on partnerships — requires total trust in your partner.',
     configFields: ['stakes', 'grossOrNet'],
     idealFor: '4 players in 2 well-matched teams. Tests partnerships under pressure.',
     difficulty: 'hard',

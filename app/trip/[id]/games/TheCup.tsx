@@ -172,6 +172,9 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
     team_b_player1_id: string; team_b_player2_id: string | null
   }>>>({})
   const [saving, setSaving] = useState(false)
+  const [isEditing, setIsEditing] = useState(false) // true when editing existing cup
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showScoredWarning, setShowScoredWarning] = useState(false)
 
   // Score input state
   const [editingMatch, setEditingMatch] = useState<string | null>(null)
@@ -213,6 +216,75 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
     setSetupStep(1)
   }
 
+  function editCup() {
+    if (!cup) return
+
+    // Check if any matches have been scored
+    const hasScored = cup.sessions.some(s =>
+      s.matches.some(m => m.result !== null)
+    )
+
+    if (hasScored) {
+      setShowScoredWarning(true)
+      return
+    }
+
+    enterEditMode()
+  }
+
+  function enterEditMode() {
+    if (!cup) return
+    setShowScoredWarning(false)
+    setIsEditing(true)
+
+    // Pre-populate from existing cup data
+    setCupName(cup.name)
+    setTeamAName(cup.team_a_name)
+    setTeamBName(cup.team_b_name)
+    setTeamAColor(cup.team_a_color)
+    setTeamBColor(cup.team_b_color)
+
+    // Rebuild assignments from cup.teams
+    const assign: Record<string, 'a' | 'b' | null> = {}
+    const caps: Record<string, boolean> = {}
+    members.forEach(m => { assign[mid(m)] = null })
+    cup.teams.forEach(t => {
+      assign[String(t.member_id)] = t.team
+      if (t.is_captain) caps[String(t.member_id)] = true
+    })
+    setAssignments(assign)
+    setCaptains(caps)
+
+    // Rebuild session formats and pairings
+    const fmts: Record<string, string> = {}
+    const pairs: Record<string, Array<{
+      team_a_player1_id: string; team_a_player2_id: string | null
+      team_b_player1_id: string; team_b_player2_id: string | null
+    }>> = {}
+
+    // Default all tee times to four_ball
+    teeTimes.forEach(t => { fmts[t.id] = 'four_ball' })
+
+    // Override with existing session data
+    cup.sessions.forEach(s => {
+      if (s.tee_time_id) {
+        fmts[s.tee_time_id] = s.format
+        if (s.matches.length > 0) {
+          pairs[s.tee_time_id] = s.matches.map(m => ({
+            team_a_player1_id: m.team_a_player1_id ?? '',
+            team_a_player2_id: m.team_a_player2_id,
+            team_b_player1_id: m.team_b_player1_id ?? '',
+            team_b_player2_id: m.team_b_player2_id,
+          }))
+        }
+      }
+    })
+
+    setSessionFormats(fmts)
+    setSessionPairings(pairs)
+    setSetupStep(1)
+  }
+
   function assignMember(memberId: string, team: 'a' | 'b') {
     setAssignments(prev => ({ ...prev, [memberId]: team }))
   }
@@ -226,60 +298,118 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
     setCaptains(prev => ({ ...prev, [memberId]: !prev[memberId] }))
   }
 
-  async function handleAutoSplit() {
-    try {
-      const res = await fetch(`/api/trips/${tripId}/cup/auto-pair`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'split' }),
-      })
-      const data = await res.json()
-      if (data.assignments) {
-        const newAssign: Record<string, 'a' | 'b' | null> = {}
-        const newCaptains: Record<string, boolean> = {}
-        data.assignments.forEach((a: { member_id: string; team: 'a' | 'b'; is_captain: boolean }) => {
-          newAssign[a.member_id] = a.team
-          if (a.is_captain) newCaptains[a.member_id] = true
-        })
-        setAssignments(newAssign)
-        setCaptains(newCaptains)
-      }
-    } catch { /* ignore */ }
+  const [splitFlash, setSplitFlash] = useState(false)
+
+  function handleAutoSplit() {
+    // Client-side snake draft by handicap — no DB needed during setup
+    const sorted = [...members].sort((a, b) => getHandicap(a) - getHandicap(b))
+    const newAssign: Record<string, 'a' | 'b' | null> = {}
+    const newCaptains: Record<string, boolean> = {}
+
+    sorted.forEach((m, i) => {
+      const round = Math.floor(i / 2)
+      const pos = i % 2
+      const team: 'a' | 'b' = (round % 2 === 0)
+        ? (pos === 0 ? 'a' : 'b')
+        : (pos === 0 ? 'b' : 'a')
+      newAssign[mid(m)] = team
+    })
+
+    // Mark first member in each team as captain
+    const aFirst = sorted.find(m => newAssign[mid(m)] === 'a')
+    const bFirst = sorted.find(m => newAssign[mid(m)] === 'b')
+    if (aFirst) newCaptains[mid(aFirst)] = true
+    if (bFirst) newCaptains[mid(bFirst)] = true
+
+    setAssignments(newAssign)
+    setCaptains(newCaptains)
+
+    // Visual feedback flash
+    setSplitFlash(true)
+    setTimeout(() => setSplitFlash(false), 1200)
   }
 
-  async function handleAutoPair(teeTimeId: string) {
+  function handleAutoPair(teeTimeId: string) {
+    // Client-side pairing using local assignments state — no DB needed during setup
     const fmt = sessionFormats[teeTimeId] ?? 'four_ball'
-    try {
-      const res = await fetch(`/api/trips/${tripId}/cup/auto-pair`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'pair', format: fmt }),
-      })
-      const data = await res.json()
-      if (data.pairings) {
-        setSessionPairings(prev => ({ ...prev, [teeTimeId]: data.pairings }))
+
+    const teamAMembers = members.filter(m => assignments[mid(m)] === 'a')
+      .sort((a, b) => getHandicap(a) - getHandicap(b))
+    const teamBMembers = members.filter(m => assignments[mid(m)] === 'b')
+      .sort((a, b) => getHandicap(a) - getHandicap(b))
+
+    const pairings: Array<{
+      team_a_player1_id: string; team_a_player2_id: string | null
+      team_b_player1_id: string; team_b_player2_id: string | null
+    }> = []
+
+    if (fmt === 'singles') {
+      const count = Math.min(teamAMembers.length, teamBMembers.length)
+      for (let i = 0; i < count; i++) {
+        pairings.push({
+          team_a_player1_id: mid(teamAMembers[i]),
+          team_a_player2_id: null,
+          team_b_player1_id: mid(teamBMembers[i]),
+          team_b_player2_id: null,
+        })
       }
-    } catch { /* ignore */ }
+    } else {
+      // Doubles: pair adjacent teammates, then match pairs across teams
+      const pairsA: string[][] = []
+      const pairsB: string[][] = []
+      for (let i = 0; i < teamAMembers.length - 1; i += 2) {
+        pairsA.push([mid(teamAMembers[i]), mid(teamAMembers[i + 1])])
+      }
+      for (let i = 0; i < teamBMembers.length - 1; i += 2) {
+        pairsB.push([mid(teamBMembers[i]), mid(teamBMembers[i + 1])])
+      }
+      const count = Math.min(pairsA.length, pairsB.length)
+      for (let i = 0; i < count; i++) {
+        pairings.push({
+          team_a_player1_id: pairsA[i][0],
+          team_a_player2_id: pairsA[i][1],
+          team_b_player1_id: pairsB[i][0],
+          team_b_player2_id: pairsB[i][1],
+        })
+      }
+    }
+
+    setSessionPairings(prev => ({ ...prev, [teeTimeId]: pairings }))
   }
 
-  async function handleCreateCup() {
+  async function handleSaveCup() {
     setSaving(true)
     try {
-      // 1. Create the cup
-      const cupRes = await fetch(`/api/trips/${tripId}/cup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: cupName,
-          team_a_name: teamAName,
-          team_b_name: teamBName,
-          team_a_color: teamAColor,
-          team_b_color: teamBColor,
-        }),
-      })
-      if (!cupRes.ok) { setSaving(false); return }
+      if (isEditing) {
+        // UPDATE existing cup
+        await fetch(`/api/trips/${tripId}/cup`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: cupName,
+            team_a_name: teamAName,
+            team_b_name: teamBName,
+            team_a_color: teamAColor,
+            team_b_color: teamBColor,
+          }),
+        })
+      } else {
+        // CREATE new cup
+        const cupRes = await fetch(`/api/trips/${tripId}/cup`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: cupName,
+            team_a_name: teamAName,
+            team_b_name: teamBName,
+            team_a_color: teamAColor,
+            team_b_color: teamBColor,
+          }),
+        })
+        if (!cupRes.ok) { setSaving(false); return }
+      }
 
-      // 2. Save team assignments
+      // 2. Save team assignments (replaces existing)
       const teamAssign = Object.entries(assignments)
         .filter(([, team]) => team !== null)
         .map(([member_id, team]) => ({
@@ -294,7 +424,7 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
         body: JSON.stringify({ assignments: teamAssign }),
       })
 
-      // 3. Create sessions with matches
+      // 3. Create sessions with matches (replaces existing)
       const sessions = teeTimes.map((t, i) => ({
         tee_time_id: t.id,
         format: sessionFormats[t.id] ?? 'four_ball',
@@ -321,6 +451,7 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
       })
 
       setSetupStep(0)
+      setIsEditing(false)
       await fetchCup()
     } catch { /* ignore */ }
     setSaving(false)
@@ -358,6 +489,8 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
     await fetch(`/api/trips/${tripId}/cup`, { method: 'DELETE' })
     setCup(null)
     setSetupStep(0)
+    setIsEditing(false)
+    setShowDeleteConfirm(false)
   }
 
   // ─── Member lookup ─────────────────────────────────────────────────────────
@@ -392,6 +525,64 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
 
     return (
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
+        {/* Scored matches warning modal */}
+        {showScoredWarning && (
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.4)',
+          }}>
+            <div style={{
+              ...CARD, padding: 28, maxWidth: 420, textAlign: 'center',
+            }}>
+              <div style={{ fontSize: '32px', marginBottom: 12 }}>⚠️</div>
+              <div style={{
+                fontSize: '16px', fontWeight: 700, fontFamily: 'var(--font-serif)',
+                fontStyle: 'italic', color: 'var(--green-deep)', marginBottom: 8,
+              }}>
+                Matches Have Been Scored
+              </div>
+              <div style={{ fontSize: '13px', color: '#6b7280', lineHeight: 1.7, marginBottom: 20 }}>
+                Editing teams or pairings may affect recorded results. Proceed with caution.
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                <button onClick={() => setShowScoredWarning(false)} style={{
+                  ...BTN_OUTLINE, padding: '8px 18px',
+                }}>
+                  Cancel
+                </button>
+                <button onClick={enterEditMode} style={{
+                  ...BTN_GOLD, padding: '8px 18px',
+                  background: '#b45309',
+                }}>
+                  Edit Anyway
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Header for edit mode */}
+        {isEditing && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 16,
+          }}>
+            <div style={{
+              fontSize: '16px', fontWeight: 600, color: 'var(--green-deep)',
+              fontFamily: 'var(--font-serif)', fontStyle: 'italic',
+            }}>
+              ✏️ Editing {cupName || 'The Cup'}
+            </div>
+            <button onClick={() => { setSetupStep(0); setIsEditing(false) }} style={{
+              background: 'none', border: 'none', color: '#9ca3af', fontSize: '13px',
+              cursor: 'pointer', textDecoration: 'underline',
+            }}>
+              Cancel
+            </button>
+          </div>
+        )}
+
         {/* Step indicator */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 28 }}>
           {['Name', 'Teams', 'Sessions'].map((label, i) => (
@@ -424,7 +615,36 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
               placeholder="e.g. Black & Gold Cup"
               style={{ ...INPUT, fontSize: '16px', fontWeight: 600, padding: '12px 16px' }}
             />
-            <div style={{ marginTop: 24, display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ marginTop: 24, display: 'flex', justifyContent: isEditing ? 'space-between' : 'flex-end', alignItems: 'center' }}>
+              {/* Delete Cup — only in edit mode */}
+              {isEditing && (
+                <div>
+                  {showDeleteConfirm ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: '12px', color: '#dc2626' }}>Delete this cup?</span>
+                      <button onClick={() => { handleDeleteCup(); setShowDeleteConfirm(false) }} style={{
+                        background: '#dc2626', color: '#fff', border: 'none', borderRadius: 6,
+                        padding: '5px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+                      }}>
+                        Yes, Delete
+                      </button>
+                      <button onClick={() => setShowDeleteConfirm(false)} style={{
+                        background: 'none', border: '1px solid #d1d5db', borderRadius: 6,
+                        padding: '5px 12px', fontSize: '12px', color: '#6b7280', cursor: 'pointer',
+                      }}>
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button onClick={() => setShowDeleteConfirm(true)} style={{
+                      background: 'none', border: 'none', color: '#dc2626', fontSize: '12px',
+                      cursor: 'pointer', textDecoration: 'underline', opacity: 0.7,
+                    }}>
+                      🗑 Delete Cup
+                    </button>
+                  )}
+                </div>
+              )}
               <button onClick={() => setSetupStep(2)} disabled={!cupName.trim()} style={{
                 ...BTN_GOLD, opacity: cupName.trim() ? 1 : 0.5,
               }}>
@@ -468,12 +688,21 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 12 }}>
+                <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
                   <button onClick={handleAutoSplit} style={{
                     ...BTN_OUTLINE, padding: '6px 14px', fontSize: '12px',
+                    transition: 'all 0.2s ease',
                   }}>
                     ✦ Auto-Split by Handicap
                   </button>
+                  {splitFlash && (
+                    <span style={{
+                      fontSize: '12px', color: '#059669', fontWeight: 600,
+                      animation: 'fadeIn 0.3s ease',
+                    }}>
+                      ✓ Teams balanced!
+                    </span>
+                  )}
                 </div>
               </div>
             )}
@@ -667,10 +896,10 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
             {/* Nav buttons */}
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
               <button onClick={() => setSetupStep(2)} style={BTN_OUTLINE}>← Back</button>
-              <button onClick={handleCreateCup} disabled={saving} style={{
+              <button onClick={handleSaveCup} disabled={saving} style={{
                 ...BTN_GOLD, opacity: saving ? 0.5 : 1,
               }}>
-                {saving ? 'Creating…' : '🏆 Create The Cup'}
+                {saving ? 'Saving…' : isEditing ? '✓ Save Changes' : '🏆 Create The Cup'}
               </button>
             </div>
           </div>
@@ -776,11 +1005,13 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
         {/* Organizer actions */}
         {isOrganizer && (
           <div style={{ marginTop: 16, display: 'flex', justifyContent: 'center', gap: 8 }}>
-            <button onClick={handleDeleteCup} style={{
-              background: 'none', border: 'none', color: '#d1d5db', fontSize: '12px',
-              cursor: 'pointer', textDecoration: 'underline',
+            <button onClick={editCup} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              background: 'none', border: '1px solid #d1d5db', borderRadius: 6,
+              padding: '5px 14px', fontSize: '12px', color: '#6b7280',
+              cursor: 'pointer', fontWeight: 500, fontFamily: 'var(--font-sans)',
             }}>
-              Delete Cup
+              ✏️ Edit
             </button>
           </div>
         )}
