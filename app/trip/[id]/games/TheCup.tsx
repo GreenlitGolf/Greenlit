@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, useMemo } from 'react'
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 
@@ -63,6 +63,15 @@ type Cup = {
   status:       string
   teams:        CupTeam[]
   sessions:     CupSession[]
+}
+
+type Round = {
+  key:           string      // "course_name::tee_date"
+  course_name:   string
+  tee_date:      string
+  tee_time_ids:  string[]    // all tee time IDs in this round
+  primary_id:    string      // first tee time ID (used as FK reference)
+  tee_time_count: number
 }
 
 type TheCupProps = {
@@ -184,6 +193,40 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
   // Collapsible sessions
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
+  // ─── Group tee times into rounds (unique course + date) ──────────────────
+
+  const rounds: Round[] = useMemo(() => {
+    const map = new Map<string, { course_name: string; tee_date: string; ids: string[] }>()
+    for (const t of teeTimes) {
+      const key = `${t.course_name}::${t.tee_date}`
+      const existing = map.get(key)
+      if (existing) {
+        existing.ids.push(t.id)
+      } else {
+        map.set(key, { course_name: t.course_name, tee_date: t.tee_date, ids: [t.id] })
+      }
+    }
+    return Array.from(map.entries()).map(([key, v]) => ({
+      key,
+      course_name: v.course_name,
+      tee_date: v.tee_date,
+      tee_time_ids: v.ids,
+      primary_id: v.ids[0],
+      tee_time_count: v.ids.length,
+    }))
+  }, [teeTimes])
+
+  // Build round lookup by any tee_time_id → round
+  const teeTimeToRound = useMemo(() => {
+    const map = new Map<string, Round>()
+    for (const r of rounds) {
+      for (const id of r.tee_time_ids) {
+        map.set(id, r)
+      }
+    }
+    return map
+  }, [rounds])
+
   // ─── Fetch cup data ────────────────────────────────────────────────────────
 
   const fetchCup = useCallback(async () => {
@@ -210,7 +253,7 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
     setAssignments(init)
     setCaptains({})
     const fmts: Record<string, string> = {}
-    teeTimes.forEach(t => { fmts[t.id] = 'four_ball' })
+    rounds.forEach(r => { fmts[r.key] = 'four_ball' })
     setSessionFormats(fmts)
     setSessionPairings({})
     setSetupStep(1)
@@ -255,27 +298,30 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
     setAssignments(assign)
     setCaptains(caps)
 
-    // Rebuild session formats and pairings
+    // Rebuild session formats and pairings keyed by round key
     const fmts: Record<string, string> = {}
     const pairs: Record<string, Array<{
       team_a_player1_id: string; team_a_player2_id: string | null
       team_b_player1_id: string; team_b_player2_id: string | null
     }>> = {}
 
-    // Default all tee times to four_ball
-    teeTimes.forEach(t => { fmts[t.id] = 'four_ball' })
+    // Default all rounds to four_ball
+    rounds.forEach(r => { fmts[r.key] = 'four_ball' })
 
-    // Override with existing session data
+    // Override with existing session data — map tee_time_id back to round key
     cup.sessions.forEach(s => {
       if (s.tee_time_id) {
-        fmts[s.tee_time_id] = s.format
-        if (s.matches.length > 0) {
-          pairs[s.tee_time_id] = s.matches.map(m => ({
-            team_a_player1_id: m.team_a_player1_id ?? '',
-            team_a_player2_id: m.team_a_player2_id,
-            team_b_player1_id: m.team_b_player1_id ?? '',
-            team_b_player2_id: m.team_b_player2_id,
-          }))
+        const round = teeTimeToRound.get(s.tee_time_id)
+        if (round) {
+          fmts[round.key] = s.format
+          if (s.matches.length > 0) {
+            pairs[round.key] = s.matches.map(m => ({
+              team_a_player1_id: m.team_a_player1_id ?? '',
+              team_a_player2_id: m.team_a_player2_id,
+              team_b_player1_id: m.team_b_player1_id ?? '',
+              team_b_player2_id: m.team_b_player2_id,
+            }))
+          }
         }
       }
     })
@@ -329,9 +375,9 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
     setTimeout(() => setSplitFlash(false), 1200)
   }
 
-  function handleAutoPair(teeTimeId: string) {
+  function handleAutoPair(roundKey: string) {
     // Client-side pairing using local assignments state — no DB needed during setup
-    const fmt = sessionFormats[teeTimeId] ?? 'four_ball'
+    const fmt = sessionFormats[roundKey] ?? 'four_ball'
 
     const teamAMembers = members.filter(m => assignments[mid(m)] === 'a')
       .sort((a, b) => getHandicap(a) - getHandicap(b))
@@ -374,7 +420,7 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
       }
     }
 
-    setSessionPairings(prev => ({ ...prev, [teeTimeId]: pairings }))
+    setSessionPairings(prev => ({ ...prev, [roundKey]: pairings }))
   }
 
   async function handleSaveCup() {
@@ -424,12 +470,12 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
         body: JSON.stringify({ assignments: teamAssign }),
       })
 
-      // 3. Create sessions with matches (replaces existing)
-      const sessions = teeTimes.map((t, i) => ({
-        tee_time_id: t.id,
-        format: sessionFormats[t.id] ?? 'four_ball',
+      // 3. Create sessions with matches — one per round, not per tee time
+      const sessions = rounds.map((r, i) => ({
+        tee_time_id: r.primary_id,
+        format: sessionFormats[r.key] ?? 'four_ball',
         session_order: i + 1,
-        matches: (sessionPairings[t.id] ?? []).map((p, mi) => ({
+        matches: (sessionPairings[r.key] ?? []).map((p, mi) => ({
           ...p,
           match_order: mi + 1,
         })),
@@ -827,10 +873,10 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
           </div>
         )}
 
-        {/* Step 3: Sessions */}
+        {/* Step 3: Sessions (grouped by round = unique course + date) */}
         {setupStep === 3 && (
           <div>
-            {teeTimes.length === 0 ? (
+            {rounds.length === 0 ? (
               <div style={{ ...CARD, padding: 32, textAlign: 'center' }}>
                 <div style={{ fontSize: '14px', color: '#6b7280', marginBottom: 12 }}>
                   No tee times set up yet. Add tee times first to create sessions, or create The Cup without sessions and add them later.
@@ -838,18 +884,25 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {teeTimes.map((t, i) => (
-                  <div key={t.id} style={{ ...CARD, padding: 20 }}>
+                {rounds.map((r, i) => (
+                  <div key={r.key} style={{ ...CARD, padding: 20 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                       <div>
                         <div style={{ fontWeight: 600, fontSize: '14px', color: '#111827' }}>
-                          Round {i + 1} — {t.course_name}
+                          Round {i + 1} — {r.course_name}
                         </div>
-                        <div style={{ fontSize: '12px', color: '#9ca3af' }}>{formatDate(t.tee_date)}</div>
+                        <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                          {formatDate(r.tee_date)}
+                          {r.tee_time_count > 1 && (
+                            <span style={{ marginLeft: 8, color: '#b5b5b5' }}>
+                              · {r.tee_time_count} tee times · {members.length} players
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <select
-                        value={sessionFormats[t.id] ?? 'four_ball'}
-                        onChange={e => setSessionFormats(prev => ({ ...prev, [t.id]: e.target.value }))}
+                        value={sessionFormats[r.key] ?? 'four_ball'}
+                        onChange={e => setSessionFormats(prev => ({ ...prev, [r.key]: e.target.value }))}
                         style={{
                           ...INPUT, width: 'auto', padding: '6px 10px', fontSize: '12px', fontWeight: 500,
                         }}
@@ -861,9 +914,9 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
                     </div>
 
                     {/* Pairings */}
-                    {sessionPairings[t.id] && sessionPairings[t.id].length > 0 && (
+                    {sessionPairings[r.key] && sessionPairings[r.key].length > 0 && (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
-                        {sessionPairings[t.id].map((p, pi) => (
+                        {sessionPairings[r.key].map((p, pi) => (
                           <div key={pi} style={{
                             display: 'flex', alignItems: 'center', gap: 8,
                             padding: '8px 12px', borderRadius: 8, background: '#f9fafb',
@@ -883,7 +936,7 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
                       </div>
                     )}
 
-                    <button onClick={() => handleAutoPair(t.id)} style={{
+                    <button onClick={() => handleAutoPair(r.key)} style={{
                       ...BTN_OUTLINE, padding: '6px 14px', fontSize: '12px',
                     }}>
                       ✦ Auto-Pair
