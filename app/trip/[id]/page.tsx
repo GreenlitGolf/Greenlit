@@ -284,6 +284,52 @@ function sortByTime(a: ItineraryItem, b: ItineraryItem) {
   return parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time)
 }
 
+/** Strip " - Round N" suffix from tee time titles */
+function stripRoundSuffix(title: string): string {
+  return title.replace(/\s*[-–—]\s*Round\s*\d+$/i, '').trim()
+}
+
+type GroupedItineraryItem = {
+  kind: 'single'
+  item: ItineraryItem
+} | {
+  kind: 'tee_time_group'
+  courseName: string
+  items: ItineraryItem[]
+  firstTime: string | null
+  courseId: string | null
+}
+
+/** Group consecutive tee_time items that share the same course (after stripping round suffix) */
+function groupDayItems(dayItems: ItineraryItem[]): GroupedItineraryItem[] {
+  const result: GroupedItineraryItem[] = []
+  let i = 0
+  while (i < dayItems.length) {
+    const item = dayItems[i]
+    if (item.type === 'tee_time') {
+      const courseName = stripRoundSuffix(item.title)
+      const group: ItineraryItem[] = [item]
+      let j = i + 1
+      while (j < dayItems.length && dayItems[j].type === 'tee_time' && stripRoundSuffix(dayItems[j].title) === courseName) {
+        group.push(dayItems[j])
+        j++
+      }
+      result.push({
+        kind: 'tee_time_group',
+        courseName,
+        items: group,
+        firstTime: group[0].start_time,
+        courseId: group[0].course_id,
+      })
+      i = j
+    } else {
+      result.push({ kind: 'single', item })
+      i++
+    }
+  }
+  return result
+}
+
 const itinLabelStyle: React.CSSProperties = {
   fontSize: '11px', fontWeight: 600, letterSpacing: '0.1em',
   textTransform: 'uppercase', color: 'var(--text-mid)', fontFamily: 'var(--font-sans)',
@@ -1613,13 +1659,133 @@ function TripItinerarySection({
                       </div>
                     ))}
 
-                    {/* Items */}
+                    {/* Items — tee times grouped by course */}
                     {dayItems.length > 0 ? (
                       <div style={{
                         display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px',
                       }}>
-                        {dayItems.map((item, idx) => {
-                          const clr    = TYPE_COLORS[item.type]
+                        {groupDayItems(dayItems).map((entry, idx) => {
+                          if (entry.kind === 'tee_time_group') {
+                            const clr = TYPE_COLORS['tee_time']
+                            const linkedCourse = entry.courseId
+                              ? tripCourses.find((tc) => tc.course_id === entry.courseId)
+                              : undefined
+                            const times = entry.items
+                              .map(i => i.start_time)
+                              .filter(Boolean) as string[]
+                            const totalPlayers = entry.items.length * 4 // rough estimate
+                            const desc = entry.items.length > 1
+                              ? `${entry.items.length} groups · Tee times: ${times.join(', ')}`
+                              : entry.items[0]?.description || null
+
+                            return (
+                              <div
+                                key={entry.items[0].id}
+                                className="itin-card"
+                                style={{
+                                  display: 'flex', background: 'var(--white)',
+                                  borderRadius: 'var(--radius-md)', overflow: 'hidden',
+                                  border: '1px solid var(--cream-dark)',
+                                  boxShadow: 'var(--shadow-subtle)',
+                                  animation: 'itin-fadeUp 0.4s ease both',
+                                  animationDelay: `${idx * 55}ms`,
+                                }}
+                              >
+                                <div style={{ width: '4px', background: clr, flexShrink: 0 }} />
+                                <div style={{
+                                  flex: 1, padding: '14px 16px',
+                                  display: 'flex', gap: '16px', alignItems: 'flex-start',
+                                }}>
+                                  {entry.firstTime ? (
+                                    <div style={{
+                                      width: '68px', flexShrink: 0, fontSize: '11px',
+                                      color: 'var(--text-light)', fontFamily: 'var(--font-sans)',
+                                      fontWeight: 600, letterSpacing: '0.05em',
+                                      textTransform: 'uppercase', paddingTop: '2px',
+                                    }}>
+                                      {entry.firstTime}
+                                    </div>
+                                  ) : (
+                                    <div style={{
+                                      width: '68px', flexShrink: 0, fontSize: '9px',
+                                      color: 'var(--cream-dark)', fontFamily: 'var(--font-sans)',
+                                      fontWeight: 400, paddingTop: '4px', fontStyle: 'italic',
+                                    }}>
+                                      No time
+                                    </div>
+                                  )}
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{
+                                      display: 'flex', alignItems: 'center',
+                                      gap: '10px', flexWrap: 'wrap',
+                                      marginBottom: desc ? '4px' : 0,
+                                    }}>
+                                      <span style={{
+                                        fontSize: '14px', fontWeight: 500,
+                                        color: 'var(--green-deep)', fontFamily: 'var(--font-sans)',
+                                      }}>
+                                        {entry.courseName}
+                                      </span>
+                                      <span style={{
+                                        fontSize: '9px', padding: '2px 8px',
+                                        borderRadius: '20px', fontWeight: 700,
+                                        letterSpacing: '0.1em', fontFamily: 'var(--font-sans)',
+                                        background: `${clr}18`, color: clr,
+                                        textTransform: 'uppercase', whiteSpace: 'nowrap',
+                                      }}>
+                                        {TYPE_LABELS['tee_time']}
+                                      </span>
+                                      {linkedCourse?.slug && (
+                                        <Link
+                                          href={`/course/${linkedCourse.slug}`}
+                                          style={{
+                                            fontSize: '11px', color: 'var(--gold)',
+                                            textDecoration: 'none', fontFamily: 'var(--font-sans)',
+                                            whiteSpace: 'nowrap',
+                                          }}
+                                        >
+                                          {linkedCourse.course_name} →
+                                        </Link>
+                                      )}
+                                    </div>
+                                    {desc && (
+                                      <p style={{
+                                        fontSize: '13px', color: 'var(--text-light)',
+                                        fontWeight: 300, lineHeight: 1.6, margin: 0,
+                                        fontFamily: 'var(--font-sans)',
+                                      }}>
+                                        {desc}
+                                      </p>
+                                    )}
+                                  </div>
+                                  {/* Actions — edit/delete for first item in group */}
+                                  <div style={{
+                                    display: 'flex', alignItems: 'center',
+                                    gap: '4px', flexShrink: 0,
+                                  }}>
+                                    <button
+                                      onClick={() => openDrawerForEdit(entry.items[0])}
+                                      className="itin-icon-btn"
+                                      title="Edit"
+                                      style={{
+                                        background: 'transparent', border: 'none',
+                                        cursor: 'pointer', color: 'var(--text-light)',
+                                        padding: '6px 8px', borderRadius: 'var(--radius-sm)',
+                                        fontSize: '13px', opacity: 0,
+                                        transition: 'opacity 0.15s, color 0.15s, background 0.15s',
+                                      }}
+                                    >
+                                      ✏
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          }
+
+                          // Single (non-tee-time) item — original rendering
+                          const item = entry.item
+                          const clr = TYPE_COLORS[item.type]
                           const isDeleting = confirmDelId === item.id
                           const linkedCourse = item.course_id
                             ? tripCourses.find((tc) => tc.course_id === item.course_id)
@@ -1638,15 +1804,11 @@ function TripItinerarySection({
                                 animationDelay: `${idx * 55}ms`,
                               }}
                             >
-                              {/* Type colour bar */}
                               <div style={{ width: '4px', background: clr, flexShrink: 0 }} />
-
-                              {/* Content */}
                               <div style={{
                                 flex: 1, padding: '14px 16px',
                                 display: 'flex', gap: '16px', alignItems: 'flex-start',
                               }}>
-                                {/* Time */}
                                 {item.start_time ? (
                                   <div style={{
                                     width: '68px', flexShrink: 0, fontSize: '11px',
@@ -1660,14 +1822,11 @@ function TripItinerarySection({
                                   <div style={{
                                     width: '68px', flexShrink: 0, fontSize: '9px',
                                     color: 'var(--cream-dark)', fontFamily: 'var(--font-sans)',
-                                    fontWeight: 400, paddingTop: '4px',
-                                    fontStyle: 'italic',
+                                    fontWeight: 400, paddingTop: '4px', fontStyle: 'italic',
                                   }}>
                                     No time
                                   </div>
                                 )}
-
-                                {/* Main */}
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{
                                     display: 'flex', alignItems: 'center',
@@ -1712,8 +1871,6 @@ function TripItinerarySection({
                                     </p>
                                   )}
                                 </div>
-
-                                {/* Actions */}
                                 <div style={{
                                   display: 'flex', alignItems: 'center',
                                   gap: '4px', flexShrink: 0,

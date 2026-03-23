@@ -175,11 +175,16 @@ function SummaryBar({ teeTimes }: { teeTimes: TeeTime[] }) {
     )
   const next = upcoming[0] ?? null
 
+  // Group tee times by course+date to count actual rounds
+  const roundSet = new Set(teeTimes.map(tt => `${tt.course_name}::${tt.tee_date}`))
+  const roundCount = roundSet.size
+  const teeTimeCount = teeTimes.length
+
   const stats = [
     {
       label: 'Total Rounds',
-      value: String(teeTimes.length),
-      sub:   `round${teeTimes.length !== 1 ? 's' : ''} booked`,
+      value: String(roundCount),
+      sub:   `round${roundCount !== 1 ? 's' : ''} · ${teeTimeCount} tee time${teeTimeCount !== 1 ? 's' : ''}`,
     },
     {
       label: 'Total Green Fees',

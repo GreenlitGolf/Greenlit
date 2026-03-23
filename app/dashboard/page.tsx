@@ -45,7 +45,7 @@ type FeaturedCourse = {
 function formatDateRange(start: string | null, end: string | null) {
   if (!start && !end) return 'Dates TBD'
   const fmt = (d: string) =>
-    new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
   if (start && end) return `${fmt(start)} – ${fmt(end)}`
   if (start) return `From ${fmt(start)}`
   return `Until ${fmt(end!)}`
