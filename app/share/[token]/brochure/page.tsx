@@ -1027,24 +1027,23 @@ export default async function BrochurePage({
                       padding: '14px 20px', background: '#fff', borderRadius: '10px',
                       border: '1px solid #e5e7eb',
                     }}>
-                      {/* Session header */}
+                      {/* Line 1: Round number (left) + Format (right) */}
                       <div style={{
-                        fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+                        fontSize: '14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       }}>
                         <span style={{ fontWeight: 600, color: 'var(--green-deep)' }}>
                           Round {s.session_order}
                         </span>
-                        {tt && (
-                          <>
-                            <span style={{ color: 'var(--text-light)' }}>·</span>
-                            <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>{tt.course_name}</span>
-                            <span style={{ color: 'var(--text-light)' }}>·</span>
-                            <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>{fmtDateShort(tt.tee_date)}</span>
-                          </>
-                        )}
-                        <span style={{ color: 'var(--text-light)' }}>·</span>
-                        <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{brFmtLabel(s.format)}</span>
+                        <span style={{ color: 'var(--gold)', fontWeight: 600, fontSize: '13px' }}>{brFmtLabel(s.format)}</span>
                       </div>
+                      {/* Line 2: Course · Date */}
+                      {tt && (
+                        <div style={{ fontSize: '13px', color: 'var(--text-mid)', fontWeight: 400, marginTop: '3px' }}>
+                          {tt.course_name}
+                          <span style={{ color: 'var(--text-light)', margin: '0 6px' }}>·</span>
+                          {fmtDateShort(tt.tee_date)}
+                        </div>
+                      )}
 
                       {/* Pairings / matchups */}
                       {s.matches.length > 0 ? (

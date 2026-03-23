@@ -536,24 +536,23 @@ export default async function ShareQuickView({
                       <div key={s.id} style={{
                         padding: '10px 12px', background: 'var(--cream)', borderRadius: '8px',
                       }}>
-                        {/* Session header */}
+                        {/* Line 1: Round number (left) + Format (right) */}
                         <div style={{
-                          fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+                          fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                         }}>
                           <span style={{ fontWeight: 600, color: 'var(--green-deep)' }}>
                             Round {s.session_order}
                           </span>
-                          {tt && (
-                            <>
-                              <span style={{ color: 'var(--text-light)' }}>·</span>
-                              <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>{tt.course_name}</span>
-                              <span style={{ color: 'var(--text-light)' }}>·</span>
-                              <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>{fmtDateShort(tt.tee_date)}</span>
-                            </>
-                          )}
-                          <span style={{ color: 'var(--text-light)' }}>·</span>
-                          <span style={{ color: 'var(--gold)', fontWeight: 500 }}>{formatLabel(s.format)}</span>
+                          <span style={{ color: 'var(--gold)', fontWeight: 500, fontSize: '12px' }}>{formatLabel(s.format)}</span>
                         </div>
+                        {/* Line 2: Course · Date */}
+                        {tt && (
+                          <div style={{ fontSize: '12px', color: 'var(--text-mid)', fontWeight: 400, marginTop: '2px' }}>
+                            {tt.course_name}
+                            <span style={{ color: 'var(--text-light)', margin: '0 6px' }}>·</span>
+                            {fmtDateShort(tt.tee_date)}
+                          </div>
+                        )}
 
                         {/* Pairings */}
                         {s.matches.length > 0 ? (
