@@ -88,7 +88,7 @@ export default function WaitlistPage() {
     }
 
     return (
-      <form onSubmit={handleSubmit} style={{
+      <form onSubmit={handleSubmit} className="wl-form" style={{
         display: 'flex',
         flexDirection: 'column',
         gap: '12px',
@@ -169,6 +169,12 @@ export default function WaitlistPage() {
         @media (min-width: 640px) {
           :root { --form-direction: row !important; }
         }
+        @media (max-width: 640px) {
+          .wl-hero-content { padding: 24px 20px !important; }
+          .wl-form { max-width: 100% !important; }
+          .wl-form button[type="submit"] { min-height: 48px !important; }
+          .wl-value-grid { gap: 32px !important; }
+        }
       `}</style>
 
       {/* ─── Hero Section ─── */}
@@ -198,7 +204,7 @@ export default function WaitlistPage() {
         }} />
 
         {/* Content */}
-        <div style={{
+        <div className="wl-hero-content" style={{
           position: 'relative',
           zIndex: 2,
           maxWidth: '520px',
@@ -269,7 +275,7 @@ export default function WaitlistPage() {
         background: 'var(--cream)',
         padding: 'clamp(48px, 8vw, 80px) 24px',
       }}>
-        <div style={{
+        <div className="wl-value-grid" style={{
           maxWidth: '960px',
           margin: '0 auto',
           display: 'grid',

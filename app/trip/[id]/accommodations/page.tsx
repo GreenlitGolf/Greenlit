@@ -136,8 +136,8 @@ function mapsUrl(address: string): string {
 function buildTripMeta(start: string | null, end: string | null, count: number): string {
   const parts: string[] = []
   if (start) {
-    const s = new Date(start).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    const e = end ? new Date(end).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
+    const s = new Date(start + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const e = end ? new Date(end + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
     parts.push(e ? `${s} – ${e}` : `From ${s}`)
   }
   if (count > 0) parts.push(`${count} golfer${count !== 1 ? 's' : ''}`)
