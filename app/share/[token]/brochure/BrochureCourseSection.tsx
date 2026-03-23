@@ -285,50 +285,6 @@ export default function BrochureCourseSection({ course, index, isLast }: Props) 
           ))}
         </div>
 
-        {/* Also on Property — compact, one line each */}
-        {onPropertyCourses.length > 0 && (
-          <div style={{ marginBottom: '28px' }}>
-            <h4 style={{ fontFamily: 'var(--font-serif)', fontSize: '15px', color: 'var(--green-deep)', fontWeight: 600, marginBottom: '10px' }}>
-              Also on Property
-            </h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {onPropertyCourses.map((c, i) => {
-                const phrase = truncatePhrase(c.description) || (c.holes ? `${c.holes} holes` : '')
-                return (
-                  <div key={i} style={{ fontSize: '13px', color: 'var(--text-mid)', display: 'flex', gap: '8px', alignItems: 'baseline' }}>
-                    <span style={{ color: GOLD, flexShrink: 0 }}>◆</span>
-                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      <strong style={{ fontWeight: 600, color: 'var(--green-deep)' }}>{c.name}</strong>
-                      {c.holes ? ` \u2014 ${c.holes} holes` : ''}
-                      {phrase && !phrase.includes('holes') ? ` · ${phrase}` : ''}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Stay on Property — only if lodging_on_property is set */}
-        {(lodgingName || lodgingDesc) && (
-          <div style={{
-            background: 'var(--green-deep)', borderRadius: '10px',
-            padding: '20px 24px', marginBottom: '8px',
-          }}>
-            <div style={{ fontSize: '10px', letterSpacing: '0.2em', textTransform: 'uppercase', color: 'var(--gold)', fontWeight: 700, marginBottom: '6px', fontFamily: 'var(--font-sans)' }}>
-              Stay on Property
-            </div>
-            {lodgingName && (
-              <div style={{ fontFamily: 'var(--font-serif)', fontSize: '16px', color: 'var(--cream)', fontWeight: 600, marginBottom: '8px' }}>
-                {lodgingName}
-              </div>
-            )}
-            <div style={{ fontSize: '13px', color: 'rgba(245,240,232,0.75)', fontWeight: 300, lineHeight: 1.7 }}>
-              {lodgingDesc}
-            </div>
-          </div>
-        )}
-
       </div>
     </section>
   )

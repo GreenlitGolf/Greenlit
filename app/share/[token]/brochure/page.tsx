@@ -293,7 +293,7 @@ export default async function BrochurePage({
   ] = await Promise.all([
     supabase.from('trip_members').select('id, trip_id, user_id, display_name, role').eq('trip_id', trip.id),
     supabase.from('itinerary_items').select('id, day_number, start_time, title, type, course_id').eq('trip_id', trip.id),
-    supabase.from('trip_report_customizations').select('tagline, day_notes, cover_photo_url').eq('trip_id', trip.id).single(),
+    supabase.from('trip_report_customizations').select('tagline, day_notes, cover_photo_url, custom_sections').eq('trip_id', trip.id).single(),
     supabase.from('trip_courses').select(`
       course_id,
       courses:course_id (
@@ -307,7 +307,7 @@ export default async function BrochurePage({
     supabase.from('tee_times').select('*').eq('trip_id', trip.id).order('tee_date').order('tee_time'),
     supabase.from('accommodations').select('*').eq('trip_id', trip.id).order('check_in_date'),
     supabase.from('budget_items').select('*').eq('trip_id', trip.id),
-    supabase.from('trip_cups').select('name, team_a_name, team_b_name, team_a_color, team_b_color, status').eq('trip_id', trip.id).maybeSingle(),
+    supabase.from('trip_cups').select('id, name, team_a_name, team_b_name, team_a_color, team_b_color, status').eq('trip_id', trip.id).maybeSingle(),
   ])
 
   const members = (membersRaw || []) as unknown as TripMember[]
@@ -316,26 +316,48 @@ export default async function BrochurePage({
   const accommodations: Accommodation[] = (accommodationsRaw || []) as Accommodation[]
   const budgetItems: BudgetItem[] = (budgetItemsRaw || []) as BudgetItem[]
 
-  // Cup data
-  const cup = cupRaw as { name: string; team_a_name: string; team_b_name: string; team_a_color: string; team_b_color: string; status: string } | null
+  // Cup data — fetch sessions, teams, and member names for summary
+  const cup = cupRaw as { id: string; name: string; team_a_name: string; team_b_name: string; team_a_color: string; team_b_color: string; status: string } | null
+
+  type CupSessionRow = { id: string; format: string; session_order: number; tee_time_id: string | null }
+  let cupSessions: CupSessionRow[] = []
+  let cupTeamA: string[] = []
+  let cupTeamB: string[] = []
   let cupScoreA = 0
   let cupScoreB = 0
+
   if (cup && cup.status !== 'setup') {
-    const { data: cupFull } = await supabase
-      .from('trip_cups').select('id').eq('trip_id', trip.id).single()
-    if (cupFull) {
-      const { data: sessIds } = await supabase
-        .from('cup_sessions').select('id').eq('cup_id', cupFull.id)
-      if (sessIds && sessIds.length > 0) {
-        const { data: matches } = await supabase
-          .from('cup_matches')
-          .select('team_a_points, team_b_points')
-          .in('session_id', sessIds.map((s: { id: string }) => s.id))
-        if (matches) {
-          for (const m of matches) {
-            cupScoreA += Number(m.team_a_points ?? 0)
-            cupScoreB += Number(m.team_b_points ?? 0)
-          }
+    const [sessRes, teamsRes] = await Promise.all([
+      supabase.from('cup_sessions').select('id, format, session_order, tee_time_id').eq('cup_id', cup.id).order('session_order'),
+      supabase.from('cup_teams').select('member_id, team').eq('cup_id', cup.id),
+    ])
+    cupSessions = (sessRes.data || []) as CupSessionRow[]
+    const teams = (teamsRes.data || []) as { member_id: string; team: 'a' | 'b' }[]
+
+    // Build member name map from already-fetched members
+    const memberNameMap: Record<string, string> = {}
+    for (const m of members) {
+      const name = m.display_name || 'Member'
+      const parts = name.split(' ')
+      memberNameMap[String(m.id)] = parts.length > 1 ? parts[parts.length - 1] : name
+    }
+
+    teams.forEach(t => {
+      const name = memberNameMap[String(t.member_id)] || 'TBD'
+      if (t.team === 'a') cupTeamA.push(name)
+      else cupTeamB.push(name)
+    })
+
+    // Scores only if complete
+    if (cup.status === 'complete' && cupSessions.length > 0) {
+      const { data: matches } = await supabase
+        .from('cup_matches')
+        .select('team_a_points, team_b_points')
+        .in('session_id', cupSessions.map(s => s.id))
+      if (matches) {
+        for (const m of matches) {
+          cupScoreA += Number(m.team_a_points ?? 0)
+          cupScoreB += Number(m.team_b_points ?? 0)
         }
       }
     }
@@ -377,7 +399,22 @@ export default async function BrochurePage({
   const dayNotes   = (custom?.day_notes as Record<string, string>) || {}
   const tagline    = custom?.tagline ?? null
   const coverUrl   = custom?.cover_photo_url ?? null
-  const hasNotes   = Object.values(dayNotes).some((n) => n?.trim())
+
+  // Parse settings from custom_sections
+  type ReportSettings = {
+    organizer_note?: string
+    accommodation_name?: string
+    accommodation_url?: string
+    accommodation_address?: string
+    show_itinerary?: boolean
+    show_tee_sheet?: boolean
+    show_budget?: boolean
+    show_cup?: boolean
+    show_accommodation?: boolean
+    show_courses?: boolean
+    show_organizer_note?: boolean
+  }
+  const settings: ReportSettings = (custom?.custom_sections as ReportSettings) || {}
 
   const organizerName = organizerRaw?.full_name?.split(' ')[0] ?? 'Your Organizer'
 
@@ -453,8 +490,10 @@ export default async function BrochurePage({
         initialTagline={tagline}
         initialDayNotes={dayNotes}
         initialCoverUrl={coverUrl}
+        initialSettings={settings}
         dayCount={tripDays.length}
         currentView="brochure"
+        organizerName={organizerName}
       />
 
       {/* ── View toggle + print — screen only ── */}
@@ -488,6 +527,32 @@ export default async function BrochurePage({
         emoji={firstCourse?.emoji ?? '\u26F3'}
         year={year}
       />
+
+      {/* ── From the Organizer ── */}
+      {settings.show_organizer_note !== false && settings.organizer_note && (
+        <section style={{ background: '#fff', padding: '48px 0 0' }}>
+          <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
+            <div style={{
+              padding: '24px 32px', borderLeft: '4px solid var(--gold)',
+              background: 'var(--cream)', borderRadius: '0 12px 12px 0',
+            }}>
+              <p style={{
+                fontFamily: 'var(--font-serif)', fontStyle: 'italic',
+                fontSize: '18px', color: 'var(--green-deep)', lineHeight: 1.7,
+                margin: 0, fontWeight: 400,
+              }}>
+                &ldquo;{settings.organizer_note}&rdquo;
+              </p>
+              <div style={{
+                fontSize: '13px', color: 'var(--text-light)', marginTop: '12px',
+                fontWeight: 500, fontFamily: 'var(--font-sans)',
+              }}>
+                — {organizerName}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ── Section 2: Trip at a Glance ── */}
       <section style={{ background: '#fff', padding: '72px 0' }}>
@@ -593,7 +658,7 @@ export default async function BrochurePage({
       </section>
 
       {/* ── Section 3: Per-course ── */}
-      {orderedCourses.length === 0 ? (
+      {settings.show_courses === false ? null : orderedCourses.length === 0 ? (
         <section style={{ background: 'var(--cream)', padding: '80px 0' }}>
           <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px', textAlign: 'center' }}>
             <div style={{ fontSize: '48px', marginBottom: '16px' }}>⛳</div>
@@ -617,7 +682,7 @@ export default async function BrochurePage({
       )}
 
       {/* ── Section: The Tee Sheet ── */}
-      {teeTimes.length > 0 && (
+      {settings.show_tee_sheet !== false && teeTimes.length > 0 && (
         <section className="tee-sheet-section" style={{ background: '#fff', padding: '72px 0' }}>
           <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
             <h2 style={{
@@ -672,7 +737,7 @@ export default async function BrochurePage({
       )}
 
       {/* ── Section: Where We're Staying ── */}
-      {accommodations.length > 0 && (
+      {settings.show_accommodation !== false && accommodations.length > 0 && (
         <section className="accommodations-section" style={{ background: 'var(--cream)', padding: '72px 0' }}>
           <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
             <h2 style={{
@@ -754,42 +819,8 @@ export default async function BrochurePage({
         </section>
       )}
 
-      {/* ── Section 4: Organizer Notes ── */}
-      {hasNotes && (
-        <section style={{ background: teeTimes.length > 0 || accommodations.length > 0 ? '#fff' : 'var(--cream)', padding: '72px 0' }}>
-          <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
-            <h2 style={{ fontFamily: 'var(--font-serif)', fontSize: '32px', color: 'var(--green-deep)', fontWeight: 700, marginBottom: '36px' }}>
-              A Note from {organizerName}
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-              {tripDays.map(({ date, dayNum }) => {
-                const note = dayNotes[String(dayNum)]
-                if (!note?.trim()) return null
-                const dayLabel = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()
-                return (
-                  <div key={dayNum}>
-                    <div style={{
-                      fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em',
-                      textTransform: 'uppercase', color: 'var(--green-deep)',
-                      fontFamily: 'var(--font-sans)', marginBottom: '10px',
-                    }}>
-                      Day {dayNum} — {dayLabel}
-                    </div>
-                    <div style={{ borderLeft: '3px solid var(--gold)', paddingLeft: '20px' }}>
-                      <p style={{ fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '18px', color: 'var(--green-deep)', lineHeight: 1.7, margin: 0, fontWeight: 400 }}>
-                        {note}
-                      </p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        </section>
-      )}
-
       {/* ── Section: What It'll Cost ── */}
-      {budgetItems.length > 0 && (
+      {settings.show_budget !== false && budgetItems.length > 0 && (
         <section className="budget-section" style={{ background: 'var(--cream)', padding: '72px 0' }}>
           <div style={{ maxWidth: '760px', margin: '0 auto', padding: '0 48px' }}>
             <h2 style={{
@@ -860,43 +891,99 @@ export default async function BrochurePage({
         </section>
       )}
 
-      {/* ── Section: The Cup ── */}
-      {cup && cup.status !== 'setup' && (
+      {/* ── Section: The Cup — Session Summary ── */}
+      {settings.show_cup !== false && cup && cup.status !== 'setup' && (
         <section style={{ padding: '56px 48px', background: 'var(--cream)' }}>
-          <div style={{ maxWidth: '720px', margin: '0 auto', textAlign: 'center' }}>
-            <div style={{ fontSize: '12px', color: 'var(--gold)', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '8px' }}>
-              🏆 The Cup
-            </div>
-            <h2 style={{
-              fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '32px',
-              fontWeight: 700, color: 'var(--green-deep)', margin: '0 0 24px',
-            }}>
-              {cup.name}
-            </h2>
-
-            <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '24px',
-              padding: '24px 32px', borderRadius: '12px',
-              background: '#fff', border: '1px solid #e5e7eb',
-            }}>
-              <div style={{ textAlign: 'right', flex: 1 }}>
-                <div style={{ fontSize: '15px', fontWeight: 600, color: cup.team_a_color }}>{cup.team_a_name}</div>
-                <div style={{ width: '36px', height: '4px', borderRadius: '2px', background: cup.team_a_color, marginLeft: 'auto', marginTop: '6px' }} />
+          <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+            <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--gold)', letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: '8px' }}>
+                🏆 The Cup
               </div>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px' }}>
-                <span style={{ fontSize: '48px', fontWeight: 700, fontFamily: 'var(--font-serif)', color: cup.team_a_color }}>
+              <h2 style={{
+                fontFamily: 'var(--font-serif)', fontStyle: 'italic', fontSize: '32px',
+                fontWeight: 700, color: 'var(--green-deep)', margin: '0 0 16px',
+              }}>
+                {cup.name}
+              </h2>
+            </div>
+
+            {/* Team rosters side by side */}
+            <div style={{
+              display: 'flex', gap: '24px', padding: '20px 28px', borderRadius: '12px',
+              background: '#fff', border: '1px solid #e5e7eb', marginBottom: '20px',
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: cup.team_a_color, marginBottom: '8px' }}>
+                  {cup.team_a_name}
+                  <span style={{ display: 'inline-block', width: '24px', height: '3px', borderRadius: '2px', background: cup.team_a_color, marginLeft: '8px', verticalAlign: 'middle' }} />
+                </div>
+                <div style={{ fontSize: '14px', color: 'var(--text-mid)', fontWeight: 300, lineHeight: 1.8 }}>
+                  {cupTeamA.join(', ') || 'TBD'}
+                </div>
+              </div>
+              <div style={{ width: '1px', background: '#e5e7eb' }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: 600, color: cup.team_b_color, marginBottom: '8px' }}>
+                  {cup.team_b_name}
+                  <span style={{ display: 'inline-block', width: '24px', height: '3px', borderRadius: '2px', background: cup.team_b_color, marginLeft: '8px', verticalAlign: 'middle' }} />
+                </div>
+                <div style={{ fontSize: '14px', color: 'var(--text-mid)', fontWeight: 300, lineHeight: 1.8 }}>
+                  {cupTeamB.join(', ') || 'TBD'}
+                </div>
+              </div>
+            </div>
+
+            {/* Session schedule */}
+            {cupSessions.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {cupSessions.map((s) => {
+                  const tt = s.tee_time_id ? teeTimesByDate[Object.keys(teeTimesByDate).find(d =>
+                    teeTimesByDate[d].some(t => t.id === s.tee_time_id)
+                  ) || '']?.find(t => t.id === s.tee_time_id) : null
+                  const fmtMap: Record<string, string> = {
+                    four_ball: 'Four-Ball', foursomes: 'Foursomes', singles: 'Singles', scramble: 'Scramble',
+                  }
+                  return (
+                    <div key={s.id} style={{
+                      display: 'flex', alignItems: 'center', gap: '10px',
+                      padding: '10px 16px', background: '#fff', borderRadius: '8px',
+                      border: '1px solid #e5e7eb', fontSize: '14px',
+                    }}>
+                      <span style={{ fontWeight: 600, color: 'var(--green-deep)' }}>
+                        Round {s.session_order}
+                      </span>
+                      {tt && (
+                        <>
+                          <span style={{ color: 'var(--text-light)' }}>·</span>
+                          <span style={{ color: 'var(--text-mid)' }}>{tt.course_name}</span>
+                          <span style={{ color: 'var(--text-light)' }}>·</span>
+                          <span style={{ color: 'var(--text-mid)' }}>{fmtDateShort(tt.tee_date)}</span>
+                        </>
+                      )}
+                      <span style={{ color: 'var(--text-light)' }}>·</span>
+                      <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{fmtMap[s.format] ?? s.format}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Final score — only if complete */}
+            {cup.status === 'complete' && (
+              <div style={{
+                marginTop: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px',
+                padding: '20px', borderRadius: '12px', background: '#fff', border: '1px solid #e5e7eb',
+              }}>
+                <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-light)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Final Score</span>
+                <span style={{ fontSize: '32px', fontWeight: 700, fontFamily: 'var(--font-serif)', color: cup.team_a_color }}>
                   {cupScoreA % 1 === 0 ? cupScoreA : cupScoreA.toFixed(1)}
                 </span>
-                <span style={{ fontSize: '24px', color: '#d1d5db', fontWeight: 300 }}>—</span>
-                <span style={{ fontSize: '48px', fontWeight: 700, fontFamily: 'var(--font-serif)', color: cup.team_b_color }}>
+                <span style={{ fontSize: '18px', color: '#d1d5db' }}>—</span>
+                <span style={{ fontSize: '32px', fontWeight: 700, fontFamily: 'var(--font-serif)', color: cup.team_b_color }}>
                   {cupScoreB % 1 === 0 ? cupScoreB : cupScoreB.toFixed(1)}
                 </span>
               </div>
-              <div style={{ textAlign: 'left', flex: 1 }}>
-                <div style={{ fontSize: '15px', fontWeight: 600, color: cup.team_b_color }}>{cup.team_b_name}</div>
-                <div style={{ width: '36px', height: '4px', borderRadius: '2px', background: cup.team_b_color, marginTop: '6px' }} />
-              </div>
-            </div>
+            )}
           </div>
         </section>
       )}
