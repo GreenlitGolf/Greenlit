@@ -296,7 +296,7 @@ export default async function BrochurePage({
     { data: budgetItemsRaw },
     { data: cupRaw },
   ] = await Promise.all([
-    supabase.from('trip_members').select('id, trip_id, user_id, display_name, role').eq('trip_id', trip.id),
+    supabase.from('trip_members').select('id, trip_id, user_id, display_name, role, handicap, trip_handicap').eq('trip_id', trip.id),
     supabase.from('itinerary_items').select('id, day_number, start_time, title, type, course_id').eq('trip_id', trip.id),
     supabase.from('trip_report_customizations').select('tagline, day_notes, cover_photo_url, custom_sections').eq('trip_id', trip.id).single(),
     supabase.from('trip_courses').select(`
@@ -321,51 +321,75 @@ export default async function BrochurePage({
   const accommodations: Accommodation[] = (accommodationsRaw || []) as Accommodation[]
   const budgetItems: BudgetItem[] = (budgetItemsRaw || []) as BudgetItem[]
 
-  // Cup data — fetch sessions, teams, and member names for summary
+  // Cup data — fetch sessions, teams with details, and matches for pairings
   const cup = cupRaw as { id: string; name: string; team_a_name: string; team_b_name: string; team_a_color: string; team_b_color: string; status: string } | null
 
-  type CupSessionRow = { id: string; format: string; session_order: number; tee_time_id: string | null }
-  let cupSessions: CupSessionRow[] = []
-  let cupTeamA: string[] = []
-  let cupTeamB: string[] = []
+  type CupRosterMember = { name: string; handicap: number; isCaptain: boolean; isTBD: boolean }
+  type CupMatchRow = {
+    id: string; session_id: string; match_order: number
+    team_a_player1_id: string | null; team_a_player2_id: string | null
+    team_b_player1_id: string | null; team_b_player2_id: string | null
+    result: string | null; score_display: string | null
+    team_a_points: number; team_b_points: number
+  }
+  type CupSessionFull = { id: string; format: string; session_order: number; tee_time_id: string | null; matches: CupMatchRow[] }
+
+  let cupSessions: CupSessionFull[] = []
+  let cupTeamA: CupRosterMember[] = []
+  let cupTeamB: CupRosterMember[] = []
+  const cupMemberMap: Record<string, { name: string; handicap: number }> = {}
   let cupScoreA = 0
   let cupScoreB = 0
 
   if (cup && cup.status !== 'setup') {
-    const [sessRes, teamsRes] = await Promise.all([
+    const [sessRes, teamsRes, matchesRes] = await Promise.all([
       supabase.from('cup_sessions').select('id, format, session_order, tee_time_id').eq('cup_id', cup.id).order('session_order'),
-      supabase.from('cup_teams').select('member_id, team').eq('cup_id', cup.id),
+      supabase.from('cup_teams').select('member_id, team, is_captain').eq('cup_id', cup.id),
+      supabase.from('cup_matches').select('id, session_id, match_order, team_a_player1_id, team_a_player2_id, team_b_player1_id, team_b_player2_id, result, score_display, team_a_points, team_b_points')
+        .in('session_id', (await supabase.from('cup_sessions').select('id').eq('cup_id', cup.id)).data?.map((s: { id: string }) => s.id) ?? [])
+        .order('match_order'),
     ])
-    cupSessions = (sessRes.data || []) as CupSessionRow[]
-    const teams = (teamsRes.data || []) as { member_id: string; team: 'a' | 'b' }[]
 
-    // Build member name map from already-fetched members
-    const memberNameMap: Record<string, string> = {}
+    const rawSessions = (sessRes.data || []) as { id: string; format: string; session_order: number; tee_time_id: string | null }[]
+    const teams = (teamsRes.data || []) as { member_id: string; team: 'a' | 'b'; is_captain: boolean }[]
+    const allMatches = (matchesRes.data || []) as CupMatchRow[]
+
+    // Build member info map from already-fetched members
     for (const m of members) {
       const name = m.display_name || 'Member'
       const parts = name.split(' ')
-      memberNameMap[String(m.id)] = parts.length > 1 ? parts[parts.length - 1] : name
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : name
+      cupMemberMap[String(m.id)] = { name: lastName, handicap: (m as unknown as { trip_handicap?: number; handicap?: number }).trip_handicap ?? (m as unknown as { handicap?: number }).handicap ?? 18 }
     }
 
+    // Build structured rosters
     teams.forEach(t => {
-      const name = memberNameMap[String(t.member_id)] || 'TBD'
-      if (t.team === 'a') cupTeamA.push(name)
-      else cupTeamB.push(name)
+      const info = cupMemberMap[String(t.member_id)]
+      const member: CupRosterMember = info
+        ? { name: info.name, handicap: info.handicap, isCaptain: t.is_captain, isTBD: false }
+        : { name: 'TBD', handicap: 18, isCaptain: false, isTBD: true }
+      if (t.team === 'a') cupTeamA.push(member)
+      else cupTeamB.push(member)
     })
 
-    // Scores only if complete
-    if (cup.status === 'complete' && cupSessions.length > 0) {
-      const { data: matches } = await supabase
-        .from('cup_matches')
-        .select('team_a_points, team_b_points')
-        .in('session_id', cupSessions.map(s => s.id))
-      if (matches) {
-        for (const m of matches) {
-          cupScoreA += Number(m.team_a_points ?? 0)
-          cupScoreB += Number(m.team_b_points ?? 0)
-        }
+    // Group matches by session
+    cupSessions = rawSessions.map(s => ({
+      ...s,
+      matches: allMatches.filter(m => m.session_id === s.id).sort((a, b) => a.match_order - b.match_order),
+    }))
+
+    // Scores if complete
+    if (cup.status === 'complete') {
+      for (const m of allMatches) {
+        cupScoreA += Number(m.team_a_points ?? 0)
+        cupScoreB += Number(m.team_b_points ?? 0)
       }
     }
+  }
+
+  function brCupName(id: string | null): string {
+    if (!id) return '?'
+    return cupMemberMap[id]?.name ?? '?'
   }
 
   // Sort items
@@ -896,8 +920,19 @@ export default async function BrochurePage({
         </section>
       )}
 
-      {/* ── Section: The Cup — Session Summary ── */}
-      {settings.show_cup !== false && cup && cup.status !== 'setup' && (
+      {/* ── Section: The Cup — Tournament Program ── */}
+      {settings.show_cup !== false && cup && cup.status !== 'setup' && (() => {
+        const brFmtLabel = (f: string) => ({ four_ball: 'Four-Ball (Best Ball)', foursomes: 'Foursomes (Alt Shot)', singles: 'Singles Match Play', scramble: 'Scramble' }[f] ?? f)
+        // Helper to find tee time by ID across all dates
+        const findTT = (id: string | null) => {
+          if (!id) return null
+          for (const d of Object.keys(teeTimesByDate)) {
+            const found = teeTimesByDate[d].find(t => t.id === id)
+            if (found) return found
+          }
+          return null
+        }
+        return (
         <section style={{ padding: '56px 48px', background: 'var(--cream)' }}>
           <div style={{ maxWidth: '720px', margin: '0 auto' }}>
             <div style={{ textAlign: 'center', marginBottom: '28px' }}>
@@ -912,61 +947,127 @@ export default async function BrochurePage({
               </h2>
             </div>
 
-            {/* Team rosters side by side */}
+            {/* Team rosters — structured two-column grid */}
             <div style={{
-              display: 'flex', gap: '24px', padding: '20px 28px', borderRadius: '12px',
-              background: '#fff', border: '1px solid #e5e7eb', marginBottom: '20px',
+              display: 'grid', gridTemplateColumns: '1fr 1fr',
+              borderRadius: '12px', overflow: 'hidden',
+              border: '1px solid #e5e7eb', marginBottom: '24px', background: '#fff',
             }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: cup.team_a_color, marginBottom: '8px' }}>
+              {/* Team A */}
+              <div style={{ padding: '20px 24px', borderRight: '1px solid #e5e7eb' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: cup.team_a_color, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {cup.team_a_name}
-                  <span style={{ display: 'inline-block', width: '24px', height: '3px', borderRadius: '2px', background: cup.team_a_color, marginLeft: '8px', verticalAlign: 'middle' }} />
+                  <span style={{ display: 'inline-block', width: '20px', height: '3px', borderRadius: '2px', background: cup.team_a_color }} />
                 </div>
-                <div style={{ fontSize: '14px', color: 'var(--text-mid)', fontWeight: 300, lineHeight: 1.8 }}>
-                  {cupTeamA.join(', ') || 'TBD'}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {cupTeamA.length > 0 ? cupTeamA.map((m, i) => (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '4px 0', fontSize: '14px',
+                      color: m.isTBD ? 'var(--text-light)' : 'var(--text-dark)',
+                      fontWeight: m.isTBD ? 300 : 400,
+                    }}>
+                      <span>
+                        {m.name}
+                        {m.isCaptain && <span style={{ color: 'var(--gold)', marginLeft: '5px', fontSize: '12px' }}>★</span>}
+                      </span>
+                      <span style={{
+                        fontSize: '12px', color: 'var(--text-light)', fontWeight: 400,
+                        background: 'var(--cream)', borderRadius: '10px', padding: '1px 8px',
+                        fontFamily: 'var(--font-sans)',
+                      }}>
+                        {m.handicap}
+                      </span>
+                    </div>
+                  )) : (
+                    <div style={{ fontSize: '14px', color: 'var(--text-light)', fontStyle: 'italic' }}>No members</div>
+                  )}
                 </div>
               </div>
-              <div style={{ width: '1px', background: '#e5e7eb' }} />
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: cup.team_b_color, marginBottom: '8px' }}>
+              {/* Team B */}
+              <div style={{ padding: '20px 24px' }}>
+                <div style={{ fontSize: '14px', fontWeight: 600, color: cup.team_b_color, marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                   {cup.team_b_name}
-                  <span style={{ display: 'inline-block', width: '24px', height: '3px', borderRadius: '2px', background: cup.team_b_color, marginLeft: '8px', verticalAlign: 'middle' }} />
+                  <span style={{ display: 'inline-block', width: '20px', height: '3px', borderRadius: '2px', background: cup.team_b_color }} />
                 </div>
-                <div style={{ fontSize: '14px', color: 'var(--text-mid)', fontWeight: 300, lineHeight: 1.8 }}>
-                  {cupTeamB.join(', ') || 'TBD'}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {cupTeamB.length > 0 ? cupTeamB.map((m, i) => (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      padding: '4px 0', fontSize: '14px',
+                      color: m.isTBD ? 'var(--text-light)' : 'var(--text-dark)',
+                      fontWeight: m.isTBD ? 300 : 400,
+                    }}>
+                      <span>
+                        {m.name}
+                        {m.isCaptain && <span style={{ color: 'var(--gold)', marginLeft: '5px', fontSize: '12px' }}>★</span>}
+                      </span>
+                      <span style={{
+                        fontSize: '12px', color: 'var(--text-light)', fontWeight: 400,
+                        background: 'var(--cream)', borderRadius: '10px', padding: '1px 8px',
+                        fontFamily: 'var(--font-sans)',
+                      }}>
+                        {m.handicap}
+                      </span>
+                    </div>
+                  )) : (
+                    <div style={{ fontSize: '14px', color: 'var(--text-light)', fontStyle: 'italic' }}>No members</div>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Session schedule */}
+            {/* Session schedule with pairings */}
             {cupSessions.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                 {cupSessions.map((s) => {
-                  const tt = s.tee_time_id ? teeTimesByDate[Object.keys(teeTimesByDate).find(d =>
-                    teeTimesByDate[d].some(t => t.id === s.tee_time_id)
-                  ) || '']?.find(t => t.id === s.tee_time_id) : null
-                  const fmtMap: Record<string, string> = {
-                    four_ball: 'Four-Ball', foursomes: 'Foursomes', singles: 'Singles', scramble: 'Scramble',
-                  }
+                  const tt = findTT(s.tee_time_id)
                   return (
                     <div key={s.id} style={{
-                      display: 'flex', alignItems: 'center', gap: '10px',
-                      padding: '10px 16px', background: '#fff', borderRadius: '8px',
-                      border: '1px solid #e5e7eb', fontSize: '14px',
+                      padding: '14px 20px', background: '#fff', borderRadius: '10px',
+                      border: '1px solid #e5e7eb',
                     }}>
-                      <span style={{ fontWeight: 600, color: 'var(--green-deep)' }}>
-                        Round {s.session_order}
-                      </span>
-                      {tt && (
-                        <>
-                          <span style={{ color: 'var(--text-light)' }}>·</span>
-                          <span style={{ color: 'var(--text-mid)' }}>{tt.course_name}</span>
-                          <span style={{ color: 'var(--text-light)' }}>·</span>
-                          <span style={{ color: 'var(--text-mid)' }}>{fmtDateShort(tt.tee_date)}</span>
-                        </>
+                      {/* Session header */}
+                      <div style={{
+                        fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+                      }}>
+                        <span style={{ fontWeight: 600, color: 'var(--green-deep)' }}>
+                          Round {s.session_order}
+                        </span>
+                        {tt && (
+                          <>
+                            <span style={{ color: 'var(--text-light)' }}>·</span>
+                            <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>{tt.course_name}</span>
+                            <span style={{ color: 'var(--text-light)' }}>·</span>
+                            <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>{fmtDateShort(tt.tee_date)}</span>
+                          </>
+                        )}
+                        <span style={{ color: 'var(--text-light)' }}>·</span>
+                        <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{brFmtLabel(s.format)}</span>
+                      </div>
+
+                      {/* Pairings / matchups */}
+                      {s.matches.length > 0 ? (
+                        <div style={{ marginTop: '8px', paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {s.matches.map((m) => (
+                            <div key={m.id} style={{ fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <span style={{ color: cup.team_a_color, fontWeight: 500 }}>
+                                {brCupName(m.team_a_player1_id)}
+                                {m.team_a_player2_id && ` & ${brCupName(m.team_a_player2_id)}`}
+                              </span>
+                              <span style={{ color: 'var(--text-light)', fontSize: '11px', fontWeight: 400 }}>vs</span>
+                              <span style={{ color: cup.team_b_color, fontWeight: 500 }}>
+                                {brCupName(m.team_b_player1_id)}
+                                {m.team_b_player2_id && ` & ${brCupName(m.team_b_player2_id)}`}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: '6px', paddingLeft: '16px', fontSize: '13px', color: 'var(--text-light)', fontStyle: 'italic' }}>
+                          Pairings TBD
+                        </div>
                       )}
-                      <span style={{ color: 'var(--text-light)' }}>·</span>
-                      <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{fmtMap[s.format] ?? s.format}</span>
                     </div>
                   )
                 })}
@@ -991,7 +1092,8 @@ export default async function BrochurePage({
             )}
           </div>
         </section>
-      )}
+        )
+      })()}
 
       {/* ── Section: Footer ── */}
       <footer style={{ background: 'var(--green-deep)', padding: '56px 48px', textAlign: 'center' }}>

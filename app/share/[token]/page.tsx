@@ -110,7 +110,7 @@ function stripRoundSuffix(title: string): string {
 
 function formatLabel(f: string): string {
   const map: Record<string, string> = {
-    four_ball: 'Four-Ball', foursomes: 'Foursomes', singles: 'Singles', scramble: 'Scramble',
+    four_ball: 'Four-Ball (Best Ball)', foursomes: 'Foursomes (Alt Shot)', singles: 'Singles Match Play', scramble: 'Scramble',
   }
   return map[f] ?? f
 }
@@ -177,57 +177,78 @@ export default async function ShareQuickView({
   const settings: ReportSettings = (custom?.custom_sections as ReportSettings) || {}
   const organizerName = organizerRaw?.full_name?.split(' ')[0] ?? 'Your Organizer'
 
-  // Cup data — fetch sessions & teams for session summary
+  // Cup data — fetch sessions, teams with details, and matches for pairings
   const cup = cupRaw as { id: string; name: string; team_a_name: string; team_b_name: string; team_a_color: string; team_b_color: string; status: string } | null
 
-  type CupSession = { id: string; format: string; session_order: number; tee_time_id: string | null }
-  type CupTeamMember = { member_id: string; team: 'a' | 'b' }
-  type TripMemberRow = { id: number | string; display_name: string | null; email: string | null }
+  type CupRosterMember = { name: string; handicap: number; isCaptain: boolean; isTBD: boolean }
+  type CupMatch = {
+    id: string; session_id: string; match_order: number
+    team_a_player1_id: string | null; team_a_player2_id: string | null
+    team_b_player1_id: string | null; team_b_player2_id: string | null
+    result: string | null; score_display: string | null
+    team_a_points: number; team_b_points: number
+  }
+  type CupSession = { id: string; format: string; session_order: number; tee_time_id: string | null; matches: CupMatch[] }
 
   let cupSessions: CupSession[] = []
-  let cupTeamA: string[] = []
-  let cupTeamB: string[] = []
-  let cupMemberMap: Record<string, string> = {}
+  let cupTeamA: CupRosterMember[] = []
+  let cupTeamB: CupRosterMember[] = []
+  let cupMemberMap: Record<string, { name: string; handicap: number }> = {}
   let cupScoreA = 0
   let cupScoreB = 0
 
   if (cup && cup.status !== 'setup') {
-    const [sessRes, teamsRes, membersRes] = await Promise.all([
+    const [sessRes, teamsRes, membersRes, matchesRes] = await Promise.all([
       supabase.from('cup_sessions').select('id, format, session_order, tee_time_id').eq('cup_id', cup.id).order('session_order'),
-      supabase.from('cup_teams').select('member_id, team').eq('cup_id', cup.id),
-      supabase.from('trip_members').select('id, display_name, email').eq('trip_id', trip.id),
+      supabase.from('cup_teams').select('member_id, team, is_captain').eq('cup_id', cup.id),
+      supabase.from('trip_members').select('id, display_name, email, handicap, trip_handicap').eq('trip_id', trip.id),
+      supabase.from('cup_matches').select('id, session_id, match_order, team_a_player1_id, team_a_player2_id, team_b_player1_id, team_b_player2_id, result, score_display, team_a_points, team_b_points')
+        .in('session_id', (await supabase.from('cup_sessions').select('id').eq('cup_id', cup.id)).data?.map((s: { id: string }) => s.id) ?? [])
+        .order('match_order'),
     ])
 
-    cupSessions = (sessRes.data || []) as CupSession[]
-    const teams = (teamsRes.data || []) as CupTeamMember[]
-    const mems = (membersRes.data || []) as TripMemberRow[]
+    const rawSessions = (sessRes.data || []) as { id: string; format: string; session_order: number; tee_time_id: string | null }[]
+    const teams = (teamsRes.data || []) as { member_id: string; team: 'a' | 'b'; is_captain: boolean }[]
+    const mems = (membersRes.data || []) as { id: number | string; display_name: string | null; email: string | null; handicap: number | null; trip_handicap: number | null }[]
+    const allMatches = (matchesRes.data || []) as CupMatch[]
 
-    // Build member name map
+    // Build member info map
     mems.forEach(m => {
       const name = m.display_name || (m.email ? m.email.split('@')[0] : 'Member')
       const parts = name.split(' ')
-      cupMemberMap[String(m.id)] = parts.length > 1 ? parts[parts.length - 1] : name
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : name
+      cupMemberMap[String(m.id)] = { name: lastName, handicap: m.trip_handicap ?? m.handicap ?? 18 }
     })
 
+    // Build roster with structured data
     teams.forEach(t => {
-      const name = cupMemberMap[String(t.member_id)] || 'TBD'
-      if (t.team === 'a') cupTeamA.push(name)
-      else cupTeamB.push(name)
+      const info = cupMemberMap[String(t.member_id)]
+      const member: CupRosterMember = info
+        ? { name: info.name, handicap: info.handicap, isCaptain: t.is_captain, isTBD: false }
+        : { name: 'TBD', handicap: 18, isCaptain: false, isTBD: true }
+      if (t.team === 'a') cupTeamA.push(member)
+      else cupTeamB.push(member)
     })
 
-    // Fetch scores if cup is complete
-    if (cup.status === 'complete' && cupSessions.length > 0) {
-      const { data: matches } = await supabase
-        .from('cup_matches')
-        .select('team_a_points, team_b_points')
-        .in('session_id', cupSessions.map(s => s.id))
-      if (matches) {
-        for (const m of matches) {
-          cupScoreA += Number(m.team_a_points ?? 0)
-          cupScoreB += Number(m.team_b_points ?? 0)
-        }
+    // Group matches by session
+    cupSessions = rawSessions.map(s => ({
+      ...s,
+      matches: allMatches.filter(m => m.session_id === s.id).sort((a, b) => a.match_order - b.match_order),
+    }))
+
+    // Scores if complete
+    if (cup.status === 'complete') {
+      for (const m of allMatches) {
+        cupScoreA += Number(m.team_a_points ?? 0)
+        cupScoreB += Number(m.team_b_points ?? 0)
       }
     }
+  }
+
+  // Helper to get member last name from ID
+  function cupName(id: string | null): string {
+    if (!id) return '?'
+    return cupMemberMap[id]?.name ?? '?'
   }
 
   // Group tee times by date for display
@@ -444,65 +465,125 @@ export default async function ShareQuickView({
                 <span>{cup.name}</span>
               </div>
 
-              {/* Team rosters */}
+              {/* Team rosters — structured two-column grid */}
               <div style={{
-                padding: '16px 20px', borderRadius: '10px',
-                background: '#fff', border: '1px solid #e5e7eb', marginBottom: '12px',
+                display: 'grid', gridTemplateColumns: '1fr 1fr',
+                borderRadius: '10px', overflow: 'hidden',
+                border: '1px solid #e5e7eb', marginBottom: '12px',
               }}>
-                <div style={{ display: 'flex', gap: '24px' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: cup.team_a_color, marginBottom: '6px' }}>
-                      {cup.team_a_name}
-                      <span style={{ display: 'inline-block', width: '20px', height: '3px', borderRadius: '2px', background: cup.team_a_color, marginLeft: '8px', verticalAlign: 'middle' }} />
-                    </div>
-                    <div style={{ fontSize: '13px', color: 'var(--text-mid)', fontWeight: 300, lineHeight: 1.8 }}>
-                      {cupTeamA.join(', ') || 'TBD'}
-                    </div>
+                {/* Team A */}
+                <div style={{ padding: '14px 16px', borderRight: '1px solid #e5e7eb' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: cup.team_a_color, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {cup.team_a_name}
+                    <span style={{ display: 'inline-block', width: '16px', height: '3px', borderRadius: '2px', background: cup.team_a_color }} />
                   </div>
-                  <div style={{ width: '1px', background: '#e5e7eb' }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '12px', fontWeight: 600, color: cup.team_b_color, marginBottom: '6px' }}>
-                      {cup.team_b_name}
-                      <span style={{ display: 'inline-block', width: '20px', height: '3px', borderRadius: '2px', background: cup.team_b_color, marginLeft: '8px', verticalAlign: 'middle' }} />
-                    </div>
-                    <div style={{ fontSize: '13px', color: 'var(--text-mid)', fontWeight: 300, lineHeight: 1.8 }}>
-                      {cupTeamB.join(', ') || 'TBD'}
-                    </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    {cupTeamA.length > 0 ? cupTeamA.map((m, i) => (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '3px 0', fontSize: '13px',
+                        color: m.isTBD ? 'var(--text-light)' : 'var(--text-dark)',
+                        fontWeight: m.isTBD ? 300 : 400,
+                      }}>
+                        <span>
+                          {m.name}
+                          {m.isCaptain && <span style={{ color: 'var(--gold)', marginLeft: '4px', fontSize: '11px' }}>★</span>}
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 400, fontFamily: 'var(--font-sans)' }}>
+                          {m.handicap}
+                        </span>
+                      </div>
+                    )) : (
+                      <div style={{ fontSize: '13px', color: 'var(--text-light)', fontStyle: 'italic' }}>No members</div>
+                    )}
+                  </div>
+                </div>
+                {/* Team B */}
+                <div style={{ padding: '14px 16px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: cup.team_b_color, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {cup.team_b_name}
+                    <span style={{ display: 'inline-block', width: '16px', height: '3px', borderRadius: '2px', background: cup.team_b_color }} />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    {cupTeamB.length > 0 ? cupTeamB.map((m, i) => (
+                      <div key={i} style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        padding: '3px 0', fontSize: '13px',
+                        color: m.isTBD ? 'var(--text-light)' : 'var(--text-dark)',
+                        fontWeight: m.isTBD ? 300 : 400,
+                      }}>
+                        <span>
+                          {m.name}
+                          {m.isCaptain && <span style={{ color: 'var(--gold)', marginLeft: '4px', fontSize: '11px' }}>★</span>}
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-light)', fontWeight: 400, fontFamily: 'var(--font-sans)' }}>
+                          {m.handicap}
+                        </span>
+                      </div>
+                    )) : (
+                      <div style={{ fontSize: '13px', color: 'var(--text-light)', fontStyle: 'italic' }}>No members</div>
+                    )}
                   </div>
                 </div>
               </div>
 
-              {/* Session schedule */}
+              {/* Session schedule with pairings */}
               {cupSessions.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {cupSessions.map((s) => {
                     const tt = s.tee_time_id ? ttMap.get(s.tee_time_id) : null
                     return (
                       <div key={s.id} style={{
-                        fontSize: '13px', color: 'var(--text-mid)', fontWeight: 300,
-                        padding: '6px 10px', background: 'var(--cream)', borderRadius: '6px',
-                        display: 'flex', alignItems: 'center', gap: '8px',
+                        padding: '10px 12px', background: 'var(--cream)', borderRadius: '8px',
                       }}>
-                        <span style={{ fontWeight: 500, color: 'var(--green-deep)' }}>
-                          Round {s.session_order}
-                        </span>
-                        {tt && (
-                          <>
-                            <span style={{ color: 'var(--text-light)' }}>·</span>
-                            <span>{tt.course_name}</span>
-                            <span style={{ color: 'var(--text-light)' }}>·</span>
-                            <span>{fmtDateShort(tt.tee_date)}</span>
-                          </>
+                        {/* Session header */}
+                        <div style={{
+                          fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap',
+                        }}>
+                          <span style={{ fontWeight: 600, color: 'var(--green-deep)' }}>
+                            Round {s.session_order}
+                          </span>
+                          {tt && (
+                            <>
+                              <span style={{ color: 'var(--text-light)' }}>·</span>
+                              <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>{tt.course_name}</span>
+                              <span style={{ color: 'var(--text-light)' }}>·</span>
+                              <span style={{ color: 'var(--text-mid)', fontWeight: 400 }}>{fmtDateShort(tt.tee_date)}</span>
+                            </>
+                          )}
+                          <span style={{ color: 'var(--text-light)' }}>·</span>
+                          <span style={{ color: 'var(--gold)', fontWeight: 500 }}>{formatLabel(s.format)}</span>
+                        </div>
+
+                        {/* Pairings */}
+                        {s.matches.length > 0 ? (
+                          <div style={{ marginTop: '6px', paddingLeft: '12px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                            {s.matches.map((m) => (
+                              <div key={m.id} style={{ fontSize: '12px', color: 'var(--text-mid)', fontWeight: 300, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ color: cup.team_a_color, fontWeight: 500 }}>
+                                  {cupName(m.team_a_player1_id)}
+                                  {m.team_a_player2_id && ` & ${cupName(m.team_a_player2_id)}`}
+                                </span>
+                                <span style={{ color: 'var(--text-light)', fontSize: '10px' }}>vs</span>
+                                <span style={{ color: cup.team_b_color, fontWeight: 500 }}>
+                                  {cupName(m.team_b_player1_id)}
+                                  {m.team_b_player2_id && ` & ${cupName(m.team_b_player2_id)}`}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: '4px', paddingLeft: '12px', fontSize: '12px', color: 'var(--text-light)', fontStyle: 'italic' }}>
+                            Pairings TBD
+                          </div>
                         )}
-                        <span style={{ color: 'var(--text-light)' }}>·</span>
-                        <span style={{ color: 'var(--gold)', fontWeight: 500 }}>{formatLabel(s.format)}</span>
                       </div>
                     )
                   })}
                 </div>
               )}
 
-              {/* Show final score only if cup is complete */}
+              {/* Final score — only if complete */}
               {cup.status === 'complete' && (
                 <div style={{
                   marginTop: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px',
