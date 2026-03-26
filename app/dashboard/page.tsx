@@ -474,7 +474,7 @@ export default function DashboardPage() {
 
   const [trips,           setTrips]           = useState<Trip[]>([])
   const [loading,         setLoading]         = useState(true)
-  const [heroPhotoUrl,    setHeroPhotoUrl]    = useState<string | null>(null)
+  // heroPhotoUrl is now derived via useLazyPhoto below, not fetched in useEffect
   const [featuredCourses, setFeaturedCourses] = useState<FeaturedCourse[]>([])
   const [kenBurnsPhotos,  setKenBurnsPhotos]  = useState<string[]>([])
 
@@ -570,25 +570,7 @@ export default function DashboardPage() {
       setTrips(enriched)
       setLoading(false)
 
-      // Fetch hero photo from the upcoming trip's own courses only
-      const heroTrip = enriched[0]
-      console.log('[Dashboard] Hero trip:', heroTrip?.name, '| Courses:', heroTrip?.courses.map(c => ({ name: c.name, placeId: c.google_place_id })))
-      const heroPlaceIds = heroTrip?.courses
-        .map((c) => c.google_place_id)
-        .filter(Boolean) as string[] ?? []
-
-      if (heroPlaceIds.length > 0) {
-        console.log('[Dashboard] Fetching hero photos for placeIds:', heroPlaceIds)
-        const urls = await Promise.all(heroPlaceIds.map(fetchPhoto))
-        const validUrls = urls.filter(Boolean) as string[]
-        if (validUrls.length > 0) {
-          setHeroPhotoUrl(validUrls[0])
-        } else {
-          console.warn('[Dashboard] No course photos resolved — using gradient')
-        }
-      } else {
-        console.log('[Dashboard] No trip courses have google_place_id — using gradient')
-      }
+      // Hero photo is now handled by useLazyPhoto hook (same as trip cards)
     }
     fetchTrips()
   }, [session])
@@ -619,6 +601,10 @@ export default function DashboardPage() {
   // ── Determine hero trip ────────────────────────────────────────────────────
   const today = new Date().toISOString().split('T')[0]
   const upcomingTrip = trips.find((t) => t.start_date && t.start_date >= today) ?? trips[0]
+
+  // Hero photo — same useLazyPhoto approach as trip cards
+  const heroPlaceId = upcomingTrip?.courses.find((c) => c.google_place_id)?.google_place_id
+  const heroPhotoUrl = useLazyPhoto(heroPlaceId)
 
   async function handleLogout() {
     await supabase.auth.signOut()
