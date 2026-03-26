@@ -272,10 +272,9 @@ function FadeInSection({ children, style }: { children: React.ReactNode; style?:
 
 // ─── Trip Card (Rich) ─────────────────────────────────────────────────────────
 
-function RichTripCard({ trip, fallbackPhotoUrl }: { trip: Trip; fallbackPhotoUrl?: string | null }) {
+function RichTripCard({ trip }: { trip: Trip }) {
   const firstPlaceId = trip.courses.find((c) => c.google_place_id)?.google_place_id
   const photoUrl = useLazyPhoto(firstPlaceId)
-  const displayPhoto = photoUrl ?? fallbackPhotoUrl
 
   return (
     <Link href={`/trip/${trip.id}`} style={{ textDecoration: 'none', flexShrink: 0, scrollSnapAlign: 'start' }}>
@@ -296,8 +295,8 @@ function RichTripCard({ trip, fallbackPhotoUrl }: { trip: Trip; fallbackPhotoUrl
         <div style={{
           height: '180px',
           position: 'relative',
-          background: displayPhoto
-            ? `url(${displayPhoto}) center/cover no-repeat`
+          background: photoUrl
+            ? `url(${photoUrl}) center/cover no-repeat`
             : FALLBACK_GRADIENT,
         }}>
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 60%)' }} />
@@ -571,39 +570,24 @@ export default function DashboardPage() {
       setTrips(enriched)
       setLoading(false)
 
-      // Fetch hero photo — fallback chain:
-      // 1. Trip's own courses' google_place_id
-      // 2. Any enriched course in the DB with a google_place_id
+      // Fetch hero photo from the upcoming trip's own courses only
       const heroTrip = enriched[0]
       console.log('[Dashboard] Hero trip:', heroTrip?.name, '| Courses:', heroTrip?.courses.map(c => ({ name: c.name, placeId: c.google_place_id })))
-      const heroPlaceId = heroTrip?.courses.find((c) => c.google_place_id)?.google_place_id
+      const heroPlaceIds = heroTrip?.courses
+        .map((c) => c.google_place_id)
+        .filter(Boolean) as string[] ?? []
 
-      if (heroPlaceId) {
-        console.log('[Dashboard] Hero placeId (from trip courses):', heroPlaceId)
-        const url = await fetchPhoto(heroPlaceId)
-        if (url) { setHeroPhotoUrl(url); return }
-        console.log('[Dashboard] Trip course photo failed, trying fallback…')
-      } else {
-        console.log('[Dashboard] No trip courses have google_place_id, trying fallback…')
-      }
-
-      // Fallback: grab a random enriched course photo from the DB
-      const { data: fallbackCourses } = await supabase
-        .from('courses')
-        .select('google_place_id')
-        .not('google_place_id', 'is', null)
-        .not('description', 'is', null)
-        .limit(5)
-      const fallbackIds = (fallbackCourses ?? []).map(c => c.google_place_id).filter(Boolean) as string[]
-      if (fallbackIds.length > 0) {
-        const randomId = fallbackIds[Math.floor(Math.random() * fallbackIds.length)]
-        console.log('[Dashboard] Fallback placeId (random enriched course):', randomId)
-        const url = await fetchPhoto(randomId)
-        if (url) { setHeroPhotoUrl(url) } else {
-          console.warn('[Dashboard] Fallback photo also failed — using gradient')
+      if (heroPlaceIds.length > 0) {
+        console.log('[Dashboard] Fetching hero photos for placeIds:', heroPlaceIds)
+        const urls = await Promise.all(heroPlaceIds.map(fetchPhoto))
+        const validUrls = urls.filter(Boolean) as string[]
+        if (validUrls.length > 0) {
+          setHeroPhotoUrl(validUrls[0])
+        } else {
+          console.warn('[Dashboard] No course photos resolved — using gradient')
         }
       } else {
-        console.warn('[Dashboard] No enriched courses with google_place_id in DB')
+        console.log('[Dashboard] No trip courses have google_place_id — using gradient')
       }
     }
     fetchTrips()
@@ -854,7 +838,7 @@ export default function DashboardPage() {
             </div>
             <ScrollStrip>
               {trips.map((trip) => (
-                <RichTripCard key={trip.id} trip={trip} fallbackPhotoUrl={heroPhotoUrl} />
+                <RichTripCard key={trip.id} trip={trip} />
               ))}
             </ScrollStrip>
           </FadeInSection>
