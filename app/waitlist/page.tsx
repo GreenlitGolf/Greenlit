@@ -1,14 +1,26 @@
 'use client'
 
 import { useState, useEffect, FormEvent, useRef } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { useAuth } from '@/context/AuthContext'
 
 type FormStatus = 'idle' | 'loading' | 'success' | 'already_registered' | 'error'
 
 export default function WaitlistPage() {
+  const { session, loading: authLoading } = useAuth()
+  const router = useRouter()
   const [email, setEmail] = useState('')
   const [status, setStatus] = useState<FormStatus>('idle')
   const [bgImage, setBgImage] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // Redirect logged-in users to dashboard
+  useEffect(() => {
+    if (!authLoading && session) {
+      router.replace('/dashboard')
+    }
+  }, [authLoading, session, router])
 
   // Fetch course photo for background
   useEffect(() => {
@@ -176,6 +188,33 @@ export default function WaitlistPage() {
           .wl-value-grid { gap: 32px !important; }
         }
       `}</style>
+
+      {/* ─── Log In Link ─── */}
+      {!authLoading && !session && (
+        <Link
+          href="/login"
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '24px',
+            zIndex: 10,
+            fontFamily: 'var(--font-sans)',
+            fontSize: '14px',
+            fontWeight: 500,
+            color: 'var(--cream)',
+            textDecoration: 'none',
+            padding: '10px 16px',
+            minWidth: '44px',
+            minHeight: '44px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transition: 'color 0.2s',
+          }}
+        >
+          Log In
+        </Link>
+      )}
 
       {/* ─── Hero Section ─── */}
       <section style={{

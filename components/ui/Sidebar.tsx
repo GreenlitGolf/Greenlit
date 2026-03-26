@@ -4,11 +4,12 @@ import React from 'react'
 import Link from 'next/link'
 
 export interface NavItem {
-  id:     string
-  icon:   string
-  label:  string
-  href:   string
-  badge?: number   // optional count badge shown on the right
+  id:      string
+  icon:    string
+  label:   string
+  href:    string
+  badge?:  number   // optional count badge shown on the right
+  section?: string  // if set, render a section label before this item
 }
 
 interface MemberAvatar {
@@ -142,20 +143,8 @@ export default function Sidebar({
 
       {/* Nav */}
       <nav style={{ flex: 1, padding: '16px 0', position: 'relative' }}>
-        <div
-          style={{
-            padding:       '12px 28px 6px',
-            fontSize:      '9px',
-            letterSpacing: '0.2em',
-            textTransform: 'uppercase',
-            color:         'var(--green-muted)',
-            fontWeight:    600,
-            fontFamily:    'var(--font-sans)',
-          }}
-        >
-          Plan
-        </div>
-        {navItems.map((item) => {
+        {navItems.map((item, idx) => {
+          const sectionLabel = item.section ?? (idx === 0 ? 'Plan' : undefined)
           const isActive = item.id === activeId
           const sharedStyle: React.CSSProperties = {
             display:       'flex',
@@ -208,26 +197,48 @@ export default function Sidebar({
             </>
           )
 
+          const sectionHeader = sectionLabel ? (
+            <div
+              key={`section-${item.id}`}
+              style={{
+                padding:       '12px 28px 6px',
+                fontSize:      '9px',
+                letterSpacing: '0.2em',
+                textTransform: 'uppercase',
+                color:         'var(--green-muted)',
+                fontWeight:    600,
+                fontFamily:    'var(--font-sans)',
+                ...(idx > 0 ? { marginTop: '8px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '16px' } : {}),
+              }}
+            >
+              {sectionLabel}
+            </div>
+          ) : null
+
           if (onItemClick) {
             return (
-              <button
-                key={item.id}
-                onClick={() => onItemClick(item.id)}
-                style={{ ...sharedStyle, border: 'none' }}
-              >
-                {inner}
-              </button>
+              <React.Fragment key={item.id}>
+                {sectionHeader}
+                <button
+                  onClick={() => onItemClick(item.id)}
+                  style={{ ...sharedStyle, border: 'none' }}
+                >
+                  {inner}
+                </button>
+              </React.Fragment>
             )
           }
 
           return (
-            <Link
-              key={item.id}
-              href={item.href}
-              style={{ ...sharedStyle, textDecoration: 'none' }}
-            >
-              {inner}
-            </Link>
+            <React.Fragment key={item.id}>
+              {sectionHeader}
+              <Link
+                href={item.href}
+                style={{ ...sharedStyle, textDecoration: 'none' }}
+              >
+                {inner}
+              </Link>
+            </React.Fragment>
           )
         })}
       </nav>

@@ -125,10 +125,10 @@ function buildNavItems(memberCount: number): NavItem[] {
     { id: 'itinerary', icon: '📅', label: 'Trip Itinerary',  href: '' },
     { id: 'games',     icon: '🎲', label: 'Golf Games',      href: '' },
     { id: 'teetimes',  icon: '🕐', label: 'Tee Times',       href: '' },
-    { id: 'report',    icon: '📄', label: 'Trip Report',     href: '' },
     { id: 'hotels',    icon: '🏨', label: 'Accommodations',  href: '' },
     { id: 'group',     icon: '👥', label: 'Group & Members', href: '', badge: memberCount > 0 ? memberCount : undefined },
     { id: 'budget',    icon: '💰', label: 'Budget Tracker',  href: '' },
+    { id: 'report',    icon: '📄', label: 'Trip Report',     href: '', section: 'Share' },
   ]
 }
 

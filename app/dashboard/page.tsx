@@ -272,9 +272,10 @@ function FadeInSection({ children, style }: { children: React.ReactNode; style?:
 
 // ─── Trip Card (Rich) ─────────────────────────────────────────────────────────
 
-function RichTripCard({ trip }: { trip: Trip }) {
+function RichTripCard({ trip, fallbackPhotoUrl }: { trip: Trip; fallbackPhotoUrl?: string | null }) {
   const firstPlaceId = trip.courses.find((c) => c.google_place_id)?.google_place_id
   const photoUrl = useLazyPhoto(firstPlaceId)
+  const displayPhoto = photoUrl ?? fallbackPhotoUrl
 
   return (
     <Link href={`/trip/${trip.id}`} style={{ textDecoration: 'none', flexShrink: 0, scrollSnapAlign: 'start' }}>
@@ -295,8 +296,8 @@ function RichTripCard({ trip }: { trip: Trip }) {
         <div style={{
           height: '180px',
           position: 'relative',
-          background: photoUrl
-            ? `url(${photoUrl}) center/cover no-repeat`
+          background: displayPhoto
+            ? `url(${displayPhoto}) center/cover no-repeat`
             : FALLBACK_GRADIENT,
         }}>
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 60%)' }} />
@@ -853,7 +854,7 @@ export default function DashboardPage() {
             </div>
             <ScrollStrip>
               {trips.map((trip) => (
-                <RichTripCard key={trip.id} trip={trip} />
+                <RichTripCard key={trip.id} trip={trip} fallbackPhotoUrl={heroPhotoUrl} />
               ))}
             </ScrollStrip>
           </FadeInSection>
