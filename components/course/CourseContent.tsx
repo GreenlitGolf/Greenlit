@@ -36,7 +36,10 @@ export default function CourseContent({
       .catch(() => setVideoState('none'))
   }, [youtubeSearchQuery])
 
-  const paragraphs = description
+  // Strip any residual HTML citation tags from enrichment
+  const cleanDescription = description.replace(/<\/?cite[^>]*>/gi, '')
+
+  const paragraphs = cleanDescription
     .split('\n\n')
     .map((p) => p.trim())
     .filter(Boolean)

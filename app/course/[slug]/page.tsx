@@ -45,6 +45,9 @@ interface Course {
   caddie_available:     boolean
   google_place_id:      string | null
   youtube_search_query: string | null
+  is_featured:          boolean
+  gd_ranking:           number | null
+  website_url:          string | null
 }
 
 // ─── Data Fetching ─────────────────────────────────────────────────────────────
@@ -179,6 +182,8 @@ export default async function CourseDetailPage({
         tagline={course.tagline ?? ''}
         emoji={course.emoji}
         googlePlaceId={course.google_place_id}
+        isFeatured={course.is_featured}
+        gdRanking={course.gd_ranking}
       />
 
       {/* ── Body ──────────────────────────────────────────────── */}
@@ -219,6 +224,7 @@ export default async function CourseDetailPage({
             lodgingDescription={course.lodging_description}
             nearbyLodging={course.nearby_lodging ?? []}
             tripId={tripId}
+            websiteUrl={course.website_url}
           />
         </div>
       </div>

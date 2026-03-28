@@ -56,9 +56,11 @@ STEP 2 — If public pricing IS found, research the course thoroughly and return
   "price_per_round_low": integer (lowest published green fee in USD),
   "price_per_round_high": integer (highest published green fee in USD),
   "tags": ["Choose relevant tags from: Links, Parkland, Desert, Mountain, Ocean Views, Bucket List, Walking Only, Cart Required, Caddies Available, Resort, Championship, Ryder Cup, Major Venue, Waterfront, Historic, Hidden Gem, Off the Beaten Path, Value Play, Family Friendly"],
-  "youtube_search_query": "[Course Name] golf course flyover"
+  "youtube_search_query": "[Course Name] golf course flyover",
+  "website_url": "Official course website URL (e.g., https://www.pebblebeach.com). Null if not found."
 }
 
+IMPORTANT: Do NOT include any HTML tags, citation tags, or markup in your response. Output clean prose only.
 Return ONLY valid JSON. No markdown, no preamble, no explanation. Just the JSON object.`
 
 // ── Deep research system prompt ───────────────────────────────
@@ -129,11 +131,15 @@ Return ONLY a valid JSON object with these exact fields:
 
   "trip_combinations": "If this course is commonly paired with 1-2 other courses for a multi-day itinerary, name them and describe the logical trip. E.g., 'Pairs naturally with Turnberry and Trump Turnberry for a 4-day Ayrshire coast trip.' Null if no obvious combination.",
 
-  "youtube_search_query": "[Course Name] golf course flyover"
+  "youtube_search_query": "[Course Name] golf course flyover",
+  "website_url": "Official course website URL (e.g., https://www.pebblebeach.com). Null if not found.",
+  "architect": "Course architect(s) name. Null if not found.",
+  "year_opened": "Year the course opened. Null if not found."
 }
 
 QUALITY BAR: Before finalizing your response, ask yourself: would a serious golfer planning a group trip learn something genuinely useful from this profile that they couldn't get from 5 minutes on Google? If not, go deeper.
 
+IMPORTANT: Do NOT include any HTML tags, citation tags, or markup in your response. Output clean prose only.
 Return ONLY valid JSON. No markdown, no preamble, no explanation.`
 
 // ── Google Places Text Search ─────────────────────────────────
@@ -442,7 +448,7 @@ export async function enrichCourse(
       price_min           : courseData.price_per_round_low  ?? null,
       price_max           : courseData.price_per_round_high ?? null,
       tagline             : courseData.tagline             ?? null,
-      description         : courseData.description         ?? null,
+      description         : (courseData.description ?? '').replace(/<\/?cite[^>]*>/gi, '') || null,
       why_its_great       : courseData.why_its_great       ?? [],
       courses_on_property : courseData.courses_on_property ?? [],
       lodging_on_property : courseData.lodging_on_property
@@ -455,7 +461,16 @@ export async function enrichCourse(
       caddie_available    : courseData.caddie_available    ?? false,
       google_place_id     : googlePlaceId,
       youtube_search_query: courseData.youtube_search_query ?? `${name} golf course flyover`,
+      website_url         : courseData.website_url         ?? null,
       updated_at          : new Date().toISOString(),
+    }
+
+    // Architect + year_opened — only write if present
+    if (courseData.architect !== undefined) {
+      courseRow.architect = courseData.architect ?? null
+    }
+    if (courseData.year_opened !== undefined) {
+      courseRow.year_opened = courseData.year_opened ?? null
     }
 
     // Deep research fields — only write if present (avoids nulling out on standard mode)

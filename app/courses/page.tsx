@@ -37,8 +37,11 @@ type Course = {
   price_min:        number | null
   price_max:        number | null
   tagline:          string | null
+  description:      string | null
   walking_friendly: boolean
   google_place_id:  string | null
+  is_featured:      boolean
+  gd_ranking:       number | null
 }
 
 // ── CourseCard ───────────────────────────────────────────────────────────────────
@@ -110,20 +113,55 @@ function CourseCard({
 
           {/* Body */}
           <div style={{ padding: '16px 20px' }}>
-            <div style={{
-              fontFamily: 'var(--font-serif)',
-              fontSize:   '15px',
-              color:      'var(--green-deep)',
-              fontWeight: 600,
-              lineHeight: 1.3,
-              marginBottom: '4px',
-            }}>
-              {course.name}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <div style={{
+                fontFamily: 'var(--font-serif)',
+                fontSize:   '15px',
+                color:      'var(--green-deep)',
+                fontWeight: 600,
+                lineHeight: 1.3,
+                flex:       1,
+                minWidth:   0,
+              }}>
+                {course.name}
+              </div>
+              {course.is_featured && course.gd_ranking && (
+                <span style={{
+                  flexShrink:    0,
+                  padding:       '2px 8px',
+                  borderRadius:  '99px',
+                  background:    'var(--green-deep)',
+                  color:         'var(--gold)',
+                  fontSize:      '9px',
+                  fontWeight:    700,
+                  letterSpacing: '0.04em',
+                  whiteSpace:    'nowrap',
+                }}>
+                  GD #{course.gd_ranking}
+                </span>
+              )}
             </div>
 
             <div style={{ fontSize: '12px', color: 'var(--text-light)', fontWeight: 300, marginBottom: '8px' }}>
               📍 {course.location}{course.country ? `, ${course.country}` : ''}
             </div>
+
+            {/* Description preview for featured courses */}
+            {course.is_featured && course.description && (
+              <div style={{
+                fontSize:      '12px',
+                color:         'var(--text-mid)',
+                fontWeight:    300,
+                lineHeight:    1.5,
+                marginBottom:  '8px',
+                display:       '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow:      'hidden',
+              }}>
+                {course.description.replace(/<\/?cite[^>]*>/gi, '').split('\n\n')[0]?.slice(0, 150)}
+              </div>
+            )}
 
             {/* Price + walking */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
@@ -249,11 +287,18 @@ export default function CoursesDirectoryPage() {
   useEffect(() => {
     supabase
       .from('courses')
-      .select('id, slug, name, location, state, country, emoji, tags, rating, price_min, price_max, tagline, walking_friendly, google_place_id')
+      .select('id, slug, name, location, state, country, emoji, tags, rating, price_min, price_max, tagline, description, walking_friendly, google_place_id, is_featured, gd_ranking')
       .not('description', 'is', null)
       .order('name', { ascending: true })
       .then(({ data }) => {
         const courses = (data ?? []) as Course[]
+        // Sort featured courses first (by ranking), then alphabetically
+        courses.sort((a, b) => {
+          if (a.is_featured && !b.is_featured) return -1
+          if (!a.is_featured && b.is_featured) return 1
+          if (a.is_featured && b.is_featured) return (a.gd_ranking ?? 999) - (b.gd_ranking ?? 999)
+          return a.name.localeCompare(b.name)
+        })
         setAllCourses(courses)
         setFiltered(courses)
         setLoading(false)

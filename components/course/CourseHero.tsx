@@ -8,9 +8,11 @@ interface CourseHeroProps {
   tagline:       string
   emoji:         string
   googlePlaceId: string | null
+  isFeatured?:   boolean
+  gdRanking?:    number | null
 }
 
-export default function CourseHero({ name, location, tagline, emoji, googlePlaceId }: CourseHeroProps) {
+export default function CourseHero({ name, location, tagline, emoji, googlePlaceId, isFeatured, gdRanking }: CourseHeroProps) {
   const [photos,       setPhotos]       = useState<string[]>([])
   const [activePhoto,  setActivePhoto]  = useState(0)
   const [photosLoaded, setPhotosLoaded] = useState(false)
@@ -132,6 +134,29 @@ export default function CourseHero({ name, location, tagline, emoji, googlePlace
         >
           {name}
         </h1>
+        {isFeatured && gdRanking && (
+          <div
+            style={{
+              display:       'inline-flex',
+              alignItems:    'center',
+              gap:           '6px',
+              padding:       '5px 14px',
+              borderRadius:  '99px',
+              background:    'rgba(26,46,26,0.7)',
+              border:        '1px solid rgba(196,168,79,0.4)',
+              backdropFilter:'blur(8px)',
+              marginBottom:  '12px',
+            }}
+          >
+            <span style={{ fontSize: '11px', color: 'var(--gold)', fontWeight: 700, letterSpacing: '0.06em' }}>
+              Golf Digest Top 100 Public
+            </span>
+            <span style={{ fontSize: '11px', color: 'rgba(196,168,79,0.5)' }}>·</span>
+            <span style={{ fontSize: '12px', color: 'var(--gold)', fontWeight: 700, fontFamily: 'var(--font-serif)' }}>
+              #{gdRanking}
+            </span>
+          </div>
+        )}
         <p
           style={{
             fontSize:   '15px',

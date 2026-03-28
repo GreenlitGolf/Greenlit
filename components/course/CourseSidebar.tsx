@@ -28,6 +28,7 @@ interface CourseSidebarProps {
   lodgingDescription: string | null
   nearbyLodging:      NearbyLodging[]
   tripId?:            string  // when navigated from within a trip context
+  websiteUrl?:        string | null
 }
 
 export default function CourseSidebar({
@@ -46,6 +47,7 @@ export default function CourseSidebar({
   lodgingDescription,
   nearbyLodging,
   tripId,
+  websiteUrl,
 }: CourseSidebarProps) {
   const { session }  = useAuth()
   const [modalOpen,  setModalOpen]  = useState(false)
@@ -264,6 +266,42 @@ export default function CourseSidebar({
                   {tag}
                 </span>
               ))}
+            </div>
+          )}
+
+          {/* Website link */}
+          {websiteUrl && (
+            <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid var(--cream-dark)' }}>
+              <a
+                href={websiteUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display:        'flex',
+                  alignItems:     'center',
+                  justifyContent: 'center',
+                  gap:            '8px',
+                  width:          '100%',
+                  padding:        '10px 16px',
+                  borderRadius:   'var(--radius-sm)',
+                  border:         '1px solid var(--gold)',
+                  background:     'transparent',
+                  color:          'var(--gold)',
+                  fontSize:       '12px',
+                  fontWeight:     600,
+                  letterSpacing:  '0.06em',
+                  textDecoration: 'none',
+                  fontFamily:     'var(--font-sans)',
+                  transition:     'background 0.15s, color 0.15s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(196,168,79,0.08)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+              >
+                Visit Website
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 3L3 9M9 3H5M9 3v4" />
+                </svg>
+              </a>
             </div>
           )}
         </div>
