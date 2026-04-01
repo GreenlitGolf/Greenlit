@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import Sidebar from '@/components/ui/Sidebar'
+import { useState, useRef, useEffect }     from 'react'
+import Sidebar                             from '@/components/ui/Sidebar'
 import CourseCard, { type CoursePickData } from '@/components/concierge/CourseCard'
-import ProtectedRoute from '@/components/ProtectedRoute'
+import ProtectedRoute                      from '@/components/ProtectedRoute'
+import { type MatchedCourse }              from '@/app/api/concierge/route'
 
 const NAV_ITEMS = [
   { id: 'concierge', icon: '✦', label: 'Golf Concierge', href: '/discover' },
@@ -24,25 +25,17 @@ const WELCOME: ChatMessage = {
   content: "Welcome to Greenlit. I'm your golf concierge — here to help your crew stop texting and start playing. Tell me about the trip you have in mind: destination dreams, when you're thinking of going, how many are in the group, and what kind of experience you're after. Bucket-list links or hidden-gem track?",
 }
 
-// Strip GREENLIT_PICKS block from visible text and parse courses
-function parseResponse(raw: string): { text: string; courses: CoursePickData[] } {
-  const picksMatch = raw.match(/GREENLIT_PICKS:\s*([\s\S]*?)\s*END_PICKS/)
-  let courses: CoursePickData[] = []
-
-  if (picksMatch) {
-    try {
-      courses = JSON.parse(picksMatch[1].trim())
-    } catch {
-      courses = []
-    }
+function matchedCourseToPick(c: MatchedCourse): CoursePickData {
+  return {
+    name:         c.name,
+    location:     c.location,
+    price:        c.price_min && c.price_max ? `$${c.price_min}–$${c.price_max}` : c.price_min ? `from $${c.price_min}` : '',
+    emoji:        c.emoji || '⛳',
+    tags:         c.tags ?? [],
+    courseId:     c.slug,
+    courseUUID:   c.id,
+    googlePlaceId: c.google_place_id ?? undefined,
   }
-
-  const text = raw
-    .replace(/GREENLIT_PICKS:[\s\S]*?END_PICKS/g, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-
-  return { text, courses }
 }
 
 export default function DiscoverPage() {
@@ -73,10 +66,7 @@ export default function DiscoverPage() {
     setStreaming(true)
 
     const assistantId = (Date.now() + 1).toString()
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantId, role: 'assistant', content: '' },
-    ])
+    setMessages((prev) => [...prev, { id: assistantId, role: 'assistant', content: '' }])
 
     try {
       const res = await fetch('/api/concierge', {
@@ -85,36 +75,20 @@ export default function DiscoverPage() {
         body:    JSON.stringify({ messages: history }),
       })
 
-      if (!res.ok || !res.body) throw new Error('Stream failed')
+      if (!res.ok) throw new Error('Request failed')
 
-      const reader  = res.body.getReader()
-      const decoder = new TextDecoder()
-      let   raw     = ''
+      const data = await res.json()
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        raw += decoder.decode(value, { stream: true })
-
-        // While streaming: show raw text but hide the picks block
-        const displayText = raw
-          .replace(/GREENLIT_PICKS:[\s\S]*?(END_PICKS|$)/g, '')
-          .replace(/\n{3,}/g, '\n\n')
-          .trim()
-
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === assistantId ? { ...m, content: displayText } : m
-          )
-        )
-      }
-
-      // On completion: parse courses
-      const { text: finalText, courses } = parseResponse(raw)
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, content: finalText, coursePicks: courses.length ? courses : undefined }
+            ? {
+                ...m,
+                content:     data.message ?? 'Sorry, something went wrong.',
+                coursePicks: data.courses?.length
+                  ? data.courses.map(matchedCourseToPick)
+                  : undefined,
+              }
             : m
         )
       )

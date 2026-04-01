@@ -10,7 +10,8 @@ import EditTripForm from '@/components/EditTripForm'
 import Sidebar from '@/components/ui/Sidebar'
 import type { NavItem } from '@/components/ui/Sidebar'
 import CourseCard, { type CoursePickData } from '@/components/concierge/CourseCard'
-import type { TripContext } from '@/app/api/concierge/route'
+import type { TripContext }       from '@/app/api/concierge/route'
+import GroupDecisionsSection      from '@/components/trip/GroupDecisionsSection'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -353,6 +354,7 @@ function buildNavItems(memberCount: number): NavItem[] {
     { id: 'teetimes',   icon: '🕐', label: 'Tee Times',         href: '' },
     { id: 'hotels',     icon: '🏨', label: 'Accommodations',    href: '' },
     { id: 'group',      icon: '👥', label: 'Group & Members',   href: '', badge: memberCount > 0 ? memberCount : undefined },
+    { id: 'decisions',  icon: '🗳️', label: 'Group Decisions',   href: '' },
     { id: 'budget',     icon: '💰', label: 'Budget Tracker',    href: '' },
     { id: 'report',     icon: '📄', label: 'Trip Report',       href: '', section: 'Share' },
   ]
@@ -366,6 +368,7 @@ const SECTION_LABELS: Record<string, string> = {
   teetimes:    'Tee Times',
   hotels:      'Accommodations',
   group:       'Group & Members',
+  decisions:   'Group Decisions',
   budget:      'Budget Tracker',
   report:      'Trip Report',
 }
@@ -2514,7 +2517,7 @@ export default function TripPage() {
   const router      = useRouter()
   const searchParams = useSearchParams()
 
-  const VALID_TABS = ['concierge', 'itinerary', 'group', 'tripcourses']
+  const VALID_TABS = ['concierge', 'itinerary', 'group', 'tripcourses', 'decisions']
   const initialTab = searchParams.get('tab')
   const defaultNav = initialTab && VALID_TABS.includes(initialTab) ? initialTab : 'concierge'
 
@@ -2720,6 +2723,13 @@ export default function TripPage() {
                     />
                   ) : isTripCourses ? (
                     <TripCoursesSection tripId={trip.id} />
+                  ) : activeNav === 'decisions' ? (
+                    <GroupDecisionsSection
+                      tripId={trip.id}
+                      members={members}
+                      isOrganizer={isOrganizer}
+                      currentUserId={session?.user.id}
+                    />
                   ) : (
                     <ComingSoon label={SECTION_LABELS[activeNav]} />
                   )}
