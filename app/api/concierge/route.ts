@@ -50,6 +50,50 @@ type CourseRow = {
   slug               : string
 }
 
+// ─── Knowledge base lookup ────────────────────────────────────────────────────
+
+type KnowledgeRow = {
+  source_author: string | null
+  category:      string
+  content:       string
+}
+
+async function fetchRelevantKnowledge(
+  query: string,
+  ctx?: TripContext,
+): Promise<KnowledgeRow[]> {
+  if (!query.trim()) return []
+
+  const supabase = createServerSupabaseClient()
+  const term     = query.replace(/[%_]/g, '').slice(0, 60)
+
+  // Build a list of terms to search against JSONB arrays
+  const searchTerms = new Set<string>()
+  searchTerms.add(term)
+
+  // Add trip context destinations/courses if available
+  if (ctx?.addedCourses) {
+    for (const c of ctx.addedCourses) searchTerms.add(c)
+  }
+
+  // Build OR conditions for destinations, courses_mentioned, and tags containment
+  const orClauses = Array.from(searchTerms).flatMap(t => [
+    `destinations.cs.["${t}"]`,
+    `courses_mentioned.cs.["${t}"]`,
+    `tags.cs.["${t}"]`,
+    `content.ilike.%${t}%`,
+  ]).join(',')
+
+  const { data } = await supabase
+    .from('concierge_knowledge')
+    .select('source_author, category, content')
+    .eq('is_active', true)
+    .or(orClauses)
+    .limit(5)
+
+  return (data ?? []) as KnowledgeRow[]
+}
+
 // ─── DB course lookup ─────────────────────────────────────────────────────────
 
 async function findRelevantCourses(query: string): Promise<CourseRow[]> {
@@ -226,7 +270,7 @@ When a user asks about a course NOT in the Greenlit database:
 3. Only emit the marker once per response, for the primary course asked about.
 4. Do not emit the marker for courses already in the database context, or for very obscure courses you know little about.`
 
-function buildSystemPrompt(ctx?: TripContext, dbCourses?: CourseRow[]): string {
+function buildSystemPrompt(ctx?: TripContext, dbCourses?: CourseRow[], knowledge?: KnowledgeRow[]): string {
   const parts: string[] = [BASE_PROMPT]
 
   if (dbCourses && dbCourses.length > 0) {
@@ -250,6 +294,15 @@ function buildSystemPrompt(ctx?: TripContext, dbCourses?: CourseRow[]): string {
   } else {
     parts.push(
       `\n\n--- GREENLIT DATABASE CONTEXT ---\nNo matching courses found in the Greenlit database for this query. Answer from your own knowledge. If the user asked about a specific course, provide genuine information about it and emit the [ENRICH_COURSE] marker so we can add it.\n---`,
+    )
+  }
+
+  if (knowledge && knowledge.length > 0) {
+    const knowledgeContext = knowledge
+      .map(k => `[${k.source_author || 'Insider tip'} — ${k.category}]: ${k.content}`)
+      .join('\n\n')
+    parts.push(
+      `\n\n--- INSIDER KNOWLEDGE (from curated sources — reference naturally, don't quote verbatim) ---\nYou may receive curated insider knowledge from golf content creators, travel experts, and personal experience. Use this knowledge naturally in your recommendations — reference it as insider tips, not as citations. For example:\n- "Insider tip: request caddies at Bandon 2+ weeks out, they fill up fast"\n- "Groups who've done this trip say 5 days is better than 4 if you can swing it"\n- Don't say "According to No Laying Up..." — just integrate the knowledge as if you know it from experience.\n\n${knowledgeContext}\n---`,
     )
   }
 
@@ -311,8 +364,11 @@ export async function POST(req: NextRequest) {
 
     // ── DB lookup ─────────────────────────────────────────────────────────────
     const lastUserText = messages.filter((m) => m.role === 'user').at(-1)?.content ?? ''
-    const dbCourses    = await findRelevantCourses(lastUserText)
-    const systemPrompt = buildSystemPrompt(tripContext, dbCourses)
+    const [dbCourses, knowledge] = await Promise.all([
+      findRelevantCourses(lastUserText),
+      fetchRelevantKnowledge(lastUserText, tripContext),
+    ])
+    const systemPrompt = buildSystemPrompt(tripContext, dbCourses, knowledge)
 
     // ── Claude API call ───────────────────────────────────────────────────────
     const response = await anthropic.messages.create({
