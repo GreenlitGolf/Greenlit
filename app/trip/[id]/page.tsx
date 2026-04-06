@@ -2528,6 +2528,7 @@ export default function TripPage() {
   const [copied,    setCopied]    = useState(false)
   const [editing,   setEditing]   = useState(false)
   const [activeNav, setActiveNav] = useState(defaultNav)
+  const [generatingPdf, setGeneratingPdf] = useState(false)
 
   const isOrganizer = trip?.created_by === session?.user.id
 
@@ -2606,13 +2607,39 @@ export default function TripPage() {
     <ProtectedRoute>
       <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', fontFamily: 'var(--font-sans)', background: 'var(--cream)' }}>
 
+        {/* PDF generating toast */}
+        {generatingPdf && (
+          <div style={{
+            position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)',
+            zIndex: 9999, background: 'var(--green-deep)', color: 'var(--gold-light)',
+            padding: '12px 24px', borderRadius: 'var(--radius-md)',
+            fontSize: '13px', fontWeight: 600, fontFamily: 'var(--font-sans)',
+            boxShadow: '0 4px 24px rgba(0,0,0,0.2)',
+            display: 'flex', alignItems: 'center', gap: '10px',
+          }}>
+            <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite', fontSize: '16px' }}>&#9696;</span>
+            Generating your trip report...
+          </div>
+        )}
+
         {/* Sidebar */}
         {trip && (
           <Sidebar
             navItems={buildNavItems(members.length)}
             activeId={activeNav}
             onItemClick={(navId) => {
-                if (navId === 'report')    { window.open(`/trip/${id}/report?pdf=true`, '_blank');  return }
+                if (navId === 'report')    {
+                  setGeneratingPdf(true)
+                  fetch(`/api/trips/${id}/report-pdf`, { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                      if (data.pdfUrl) window.open(data.pdfUrl, '_blank')
+                      else window.open(`/trip/${id}/report`, '_blank')
+                    })
+                    .catch(() => window.open(`/trip/${id}/report`, '_blank'))
+                    .finally(() => setGeneratingPdf(false))
+                  return
+                }
                 if (navId === 'games')    { router.push(`/trip/${id}/games`);          return }
                 if (navId === 'teetimes') { router.push(`/trip/${id}/tee-times`);      return }
                 if (navId === 'hotels')   { router.push(`/trip/${id}/accommodations`); return }

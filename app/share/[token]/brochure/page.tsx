@@ -1111,11 +1111,11 @@ export default async function BrochurePage({
 
       {/* ── Print / client scripts ── */}
       <style>{`
-        @media print {
+        @media print, .pdf-mode {
           .no-print { display: none !important; }
           .page-break { page-break-before: always; }
           .cover-section { height: 100vh !important; overflow: hidden; }
-          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           body { margin: 0; }
           @page { margin: 0; }
           img { max-width: 100%; }
@@ -1123,6 +1123,8 @@ export default async function BrochurePage({
           .budget-section { page-break-before: always; }
           .photo-strip { grid-template-columns: repeat(2, 1fr) !important; }
         }
+        .pdf-mode .no-print,
+        .pdf-mode .organizer-banner { display: none !important; }
         @media (max-width: 640px) {
           /* Section inner padding — shrink from 48px to 16px */
           section > div[style*="padding: 0 48px"],
@@ -1144,6 +1146,9 @@ export default async function BrochurePage({
       `}</style>
       <script dangerouslySetInnerHTML={{ __html: `
         document.getElementById('print-btn')?.addEventListener('click', function() { window.print() });
+        if (new URLSearchParams(window.location.search).get('pdf') === 'true') {
+          document.documentElement.classList.add('pdf-mode');
+        }
       `}} />
     </>
   )
