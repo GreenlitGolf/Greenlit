@@ -616,6 +616,8 @@ export default async function ShareQuickView({
           @page { margin: 0.75in; size: letter; }
           * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
+        /* Hide all UI when opened as PDF */
+        .pdf-mode .no-print { display: none !important; }
         @media (max-width: 640px) {
           /* Main container — tighter padding on mobile */
           .qv-container { padding: 32px 16px 48px !important; }
@@ -630,6 +632,16 @@ export default async function ShareQuickView({
           .qv-view-toggle a { padding: 6px 10px !important; font-size: 11px !important; }
         }
       `}</style>
+
+      {/* Auto-print when opened with ?pdf=true */}
+      <script dangerouslySetInnerHTML={{ __html: `
+        if (new URLSearchParams(window.location.search).get('pdf') === 'true') {
+          document.body.classList.add('pdf-mode');
+          window.addEventListener('load', function() {
+            setTimeout(function() { window.print(); }, 600);
+          });
+        }
+      `}} />
     </>
   )
 }
