@@ -368,7 +368,7 @@ export default function AdminKnowledgePage() {
 
   // ── Auto-Tag ───────────────────────────────────────────────
   async function handleAutoTag() {
-    if (!form.content.trim()) return
+    if (!form.content.trim() && !form.source_url.trim()) return
     setAutoTagging(true)
     try {
       const res  = await fetch('/api/admin/knowledge/auto-tag', {
@@ -377,7 +377,7 @@ export default function AdminKnowledgePage() {
           'Content-Type': 'application/json',
           Authorization:  `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`,
         },
-        body: JSON.stringify({ content: form.content }),
+        body: JSON.stringify({ content: form.content, url: form.source_url }),
       })
       const json = await res.json()
       if (json.data) {
@@ -387,6 +387,7 @@ export default function AdminKnowledgePage() {
         if (d.courses_mentioned) set('courses_mentioned', d.courses_mentioned)
         if (d.tags)              set('tags', d.tags)
         if (d.summary_title && !form.title) set('title', d.summary_title)
+        if (d.summary_content && !form.content.trim()) set('content', d.summary_content)
       }
     } catch { /* ignore */ }
     setAutoTagging(false)
@@ -499,29 +500,40 @@ export default function AdminKnowledgePage() {
             <button onClick={() => { setShowForm(false); setForm({ ...EMPTY_FORM }) }} style={btnSmall}>Cancel</button>
           </div>
 
-          {/* Content first — this is the main thing you paste */}
+          {/* Source URL first — paste a link and auto-tag */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={labelStyle}>Source URL</label>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <input
+                value={form.source_url}
+                onChange={e => set('source_url', e.target.value)}
+                placeholder="Paste a link — article, Instagram, YouTube, etc."
+                style={{ ...inputStyle, flex: 1 }}
+              />
+              <button
+                onClick={handleAutoTag}
+                disabled={autoTagging || (!form.content.trim() && !form.source_url.trim())}
+                style={{
+                  ...btnPrimary,
+                  opacity: (autoTagging || (!form.content.trim() && !form.source_url.trim())) ? 0.5 : 1,
+                  padding: '10px 16px', fontSize: '12px', whiteSpace: 'nowrap',
+                }}
+              >
+                {autoTagging ? 'Tagging...' : 'Auto-Tag with AI'}
+              </button>
+            </div>
+          </div>
+
+          {/* Content */}
           <div style={{ marginBottom: '16px' }}>
             <label style={labelStyle}>Content</label>
             <textarea
               rows={6}
               value={form.content}
               onChange={e => set('content', e.target.value)}
-              placeholder="Paste or write the knowledge here — bullet points, tips, trip recaps..."
+              placeholder="Paste or write the knowledge here — or just paste a URL above and hit Auto-Tag"
               style={textareaStyle}
             />
-            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-              <button
-                onClick={handleAutoTag}
-                disabled={autoTagging || !form.content.trim()}
-                style={{
-                  ...btnOutline,
-                  opacity: (autoTagging || !form.content.trim()) ? 0.5 : 1,
-                  padding: '6px 14px', fontSize: '12px',
-                }}
-              >
-                {autoTagging ? 'Tagging...' : 'Auto-Tag with AI'}
-              </button>
-            </div>
           </div>
 
           {/* Title */}
@@ -571,17 +583,6 @@ export default function AdminKnowledgePage() {
                 style={inputStyle}
               />
             </div>
-          </div>
-
-          {/* Source URL */}
-          <div style={{ marginBottom: '16px' }}>
-            <label style={labelStyle}>Source URL</label>
-            <input
-              value={form.source_url}
-              onChange={e => set('source_url', e.target.value)}
-              placeholder="https://..."
-              style={inputStyle}
-            />
           </div>
 
           {/* Destinations */}
