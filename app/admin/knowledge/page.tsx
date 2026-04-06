@@ -27,6 +27,7 @@ type KnowledgeEntry = {
   courses_mentioned: string[]
   tags:              string[]
   is_active:         boolean
+  screenshot_url:    string | null
   created_at:        string
   updated_at:        string
 }
@@ -127,15 +128,6 @@ const btnDanger: React.CSSProperties = {
   ...btnSmall, color: '#d97070', borderColor: '#d97070',
 }
 
-const chipStyle = (active: boolean): React.CSSProperties => ({
-  display: 'inline-block', padding: '4px 10px', borderRadius: '99px',
-  fontSize: '12px', fontWeight: 500, cursor: 'pointer', marginRight: '6px',
-  marginBottom: '6px', border: '1px solid',
-  background: active ? 'var(--green)' : 'transparent',
-  color: active ? 'var(--white)' : 'var(--green-deep)',
-  borderColor: active ? 'var(--green)' : 'var(--cream-dark)',
-})
-
 const CATEGORY_COLORS: Record<Category, { bg: string; color: string }> = {
   trip_recommendation: { bg: 'rgba(45,90,60,0.15)',   color: 'var(--green-light)' },
   course_review:       { bg: 'rgba(196,168,79,0.15)', color: 'var(--gold)' },
@@ -220,7 +212,6 @@ function TagInput({
     }
   }
 
-  // Close suggestions on outside click
   useEffect(() => {
     function handler(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setShowSugg(false)
@@ -239,7 +230,7 @@ function TagInput({
           <span key={tag} style={{
             display: 'inline-flex', alignItems: 'center', gap: '4px',
             padding: '2px 8px', borderRadius: '99px', fontSize: '12px',
-            background: 'var(--green)', color: 'var(--white)', fontWeight: 500,
+            background: '#2d4a2d', color: '#ffffff', fontWeight: 500,
           }}>
             {tag}
             <span onClick={() => remove(tag)} style={{ cursor: 'pointer', opacity: 0.8 }}>x</span>
@@ -285,6 +276,20 @@ function TagInput({
   )
 }
 
+// ── Image helpers ────────────────────────────────────────────────────────────
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload  = () => {
+      const result = reader.result as string
+      resolve(result.split(',')[1]) // strip data:... prefix
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default function AdminKnowledgePage() {
@@ -302,6 +307,14 @@ export default function AdminKnowledgePage() {
   const [saveMsg,        setSaveMsg]        = useState<{ ok: boolean; text: string } | null>(null)
   const [autoTagging,    setAutoTagging]    = useState(false)
   const [courseSugg,     setCourseSugg]     = useState<string[]>([])
+
+  // Screenshot state
+  const [imageFile,      setImageFile]      = useState<File | null>(null)
+  const [imagePreview,   setImagePreview]   = useState<string | null>(null)
+  const [screenshotUrl,  setScreenshotUrl]  = useState<string | null>(null)
+  const fileInputRef                        = useRef<HTMLInputElement>(null)
+  const dropRef                             = useRef<HTMLDivElement>(null)
+  const [dragging,       setDragging]       = useState(false)
 
   // ── Admin guard ────────────────────────────────────────────
   useEffect(() => {
@@ -344,8 +357,15 @@ export default function AdminKnowledgePage() {
   const set = (field: keyof FormState, value: any) =>
     setForm(prev => ({ ...prev, [field]: value }))
 
-  function openNew() {
+  function resetForm() {
     setForm({ ...EMPTY_FORM })
+    setImageFile(null)
+    setImagePreview(null)
+    setScreenshotUrl(null)
+  }
+
+  function openNew() {
+    resetForm()
     setShowForm(true)
   }
 
@@ -363,21 +383,69 @@ export default function AdminKnowledgePage() {
       tags:              entry.tags ?? [],
       is_active:         entry.is_active,
     })
+    setImageFile(null)
+    setImagePreview(null)
+    setScreenshotUrl(entry.screenshot_url ?? null)
     setShowForm(true)
+  }
+
+  // ── Image handling ─────────────────────────────────────────
+  function handleImageSelect(file: File | null) {
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      setSaveMsg({ ok: false, text: 'Image too large (max 5MB)' })
+      setTimeout(() => setSaveMsg(null), 3000)
+      return
+    }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setSaveMsg({ ok: false, text: 'Only JPG, PNG, and WebP allowed' })
+      setTimeout(() => setSaveMsg(null), 3000)
+      return
+    }
+    setImageFile(file)
+    const url = URL.createObjectURL(file)
+    setImagePreview(url)
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) handleImageSelect(file)
+  }
+
+  function removeImage() {
+    setImageFile(null)
+    setImagePreview(null)
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   // ── Auto-Tag ───────────────────────────────────────────────
   async function handleAutoTag() {
-    if (!form.content.trim() && !form.source_url.trim()) return
+    const hasImage   = !!imageFile
+    const hasContent = !!form.content.trim()
+    if (!hasImage && !hasContent) return
+
     setAutoTagging(true)
     try {
+      let body: any = {}
+
+      if (hasImage) {
+        // Vision-based: send image as base64
+        const base64 = await fileToBase64(imageFile!)
+        body = { image: base64, imageType: imageFile!.type }
+      } else {
+        // Text-based
+        body = { content: form.content }
+      }
+
       const res  = await fetch('/api/admin/knowledge/auto-tag', {
         method:  'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization:  `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}`,
         },
-        body: JSON.stringify({ content: form.content, url: form.source_url }),
+        body: JSON.stringify(body),
       })
       const json = await res.json()
       if (json.data) {
@@ -386,11 +454,30 @@ export default function AdminKnowledgePage() {
         if (d.destinations)      set('destinations', d.destinations)
         if (d.courses_mentioned) set('courses_mentioned', d.courses_mentioned)
         if (d.tags)              set('tags', d.tags)
-        if (d.summary_title && !form.title) set('title', d.summary_title)
-        if (d.summary_content && !form.content.trim()) set('content', d.summary_content)
+        if (d.summary_title)     set('title', d.summary_title)
+        if (d.summary_content)   set('content', d.summary_content)
+        if (d.author && !form.source_author) set('source_author', d.author)
       }
     } catch { /* ignore */ }
     setAutoTagging(false)
+  }
+
+  // ── Upload screenshot to Supabase ──────────────────────────
+  async function uploadScreenshot(): Promise<string | null> {
+    if (!imageFile) return screenshotUrl // keep existing if editing
+    try {
+      const formData = new FormData()
+      formData.append('file', imageFile)
+      const res = await fetch('/api/admin/knowledge/upload', {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_CRON_SECRET}` },
+        body:    formData,
+      })
+      const json = await res.json()
+      return json.url ?? null
+    } catch {
+      return null
+    }
   }
 
   // ── Save ───────────────────────────────────────────────────
@@ -404,6 +491,8 @@ export default function AdminKnowledgePage() {
     setSaving(true)
     setSaveMsg(null)
 
+    const uploadedUrl = await uploadScreenshot()
+
     const payload: any = {
       title:             form.title,
       content:           form.content,
@@ -415,6 +504,7 @@ export default function AdminKnowledgePage() {
       courses_mentioned: form.courses_mentioned,
       tags:              form.tags,
       is_active:         form.is_active,
+      screenshot_url:    uploadedUrl,
     }
 
     try {
@@ -434,7 +524,7 @@ export default function AdminKnowledgePage() {
       } else {
         setSaveMsg({ ok: true, text: isEdit ? 'Updated!' : 'Saved!' })
         setShowForm(false)
-        setForm({ ...EMPTY_FORM })
+        resetForm()
         loadEntries()
       }
     } catch (err: any) {
@@ -470,6 +560,8 @@ export default function AdminKnowledgePage() {
   // ── Guard ──────────────────────────────────────────────────
   if (!session) return null
 
+  const canAutoTag = !!imageFile || !!form.content.trim()
+
   // ── Render ─────────────────────────────────────────────────
   return (
     <div style={{
@@ -492,49 +584,116 @@ export default function AdminKnowledgePage() {
         <button onClick={openNew} style={btnPrimary}>+ Add Entry</button>
       </div>
 
-      {/* ── Quick Add / Edit Form ─────────────────────────────── */}
+      {/* ── Add / Edit Form ───────────────────────────────────── */}
       {showForm && (
         <div style={sectionStyle}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
             <span style={sectionTitleStyle}>{form.id ? 'Edit Entry' : 'New Entry'}</span>
-            <button onClick={() => { setShowForm(false); setForm({ ...EMPTY_FORM }) }} style={btnSmall}>Cancel</button>
+            <button onClick={() => { setShowForm(false); resetForm() }} style={btnSmall}>Cancel</button>
           </div>
 
-          {/* Source URL first — paste a link and auto-tag */}
+          {/* Screenshot Upload */}
           <div style={{ marginBottom: '16px' }}>
-            <label style={labelStyle}>Source URL</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                value={form.source_url}
-                onChange={e => set('source_url', e.target.value)}
-                placeholder="Paste a link — article, Instagram, YouTube, etc."
-                style={{ ...inputStyle, flex: 1 }}
-              />
-              <button
-                onClick={handleAutoTag}
-                disabled={autoTagging || (!form.content.trim() && !form.source_url.trim())}
+            <label style={labelStyle}>Upload Screenshot</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              onChange={e => handleImageSelect(e.target.files?.[0] ?? null)}
+              style={{ display: 'none' }}
+            />
+            {imagePreview || screenshotUrl ? (
+              <div style={{ position: 'relative', display: 'inline-block' }}>
+                <img
+                  src={imagePreview || screenshotUrl!}
+                  alt="Screenshot preview"
+                  style={{
+                    maxWidth: '100%', maxHeight: '240px', borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--cream-dark)', objectFit: 'contain',
+                  }}
+                />
+                <button
+                  onClick={removeImage}
+                  style={{
+                    position: 'absolute', top: '8px', right: '8px',
+                    background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none',
+                    borderRadius: '50%', width: '24px', height: '24px',
+                    cursor: 'pointer', fontSize: '14px', lineHeight: '24px',
+                    textAlign: 'center', padding: 0,
+                  }}
+                >
+                  x
+                </button>
+              </div>
+            ) : (
+              <div
+                ref={dropRef}
+                onClick={() => fileInputRef.current?.click()}
+                onDragOver={e => { e.preventDefault(); setDragging(true) }}
+                onDragLeave={() => setDragging(false)}
+                onDrop={handleDrop}
                 style={{
-                  ...btnPrimary,
-                  opacity: (autoTagging || (!form.content.trim() && !form.source_url.trim())) ? 0.5 : 1,
-                  padding: '10px 16px', fontSize: '12px', whiteSpace: 'nowrap',
+                  border: `2px dashed ${dragging ? '#2d4a2d' : 'var(--cream-dark)'}`,
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '32px 24px',
+                  textAlign: 'center',
+                  cursor: 'pointer',
+                  background: dragging ? 'rgba(45,74,45,0.04)' : 'transparent',
+                  transition: 'all 0.15s ease',
                 }}
               >
-                {autoTagging ? 'Tagging...' : 'Auto-Tag with AI'}
-              </button>
-            </div>
+                <p style={{ margin: '0 0 4px', fontSize: '14px', color: 'var(--green-deep)' }}>
+                  Drop a screenshot here or click to upload
+                </p>
+                <p style={{ margin: 0, fontSize: '12px', color: 'var(--text-light)' }}>
+                  Screenshot from Instagram, TikTok, YouTube, etc. (JPG, PNG, WebP — max 5MB)
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* Divider */}
+          <div style={{
+            textAlign: 'center', margin: '16px 0', fontSize: '11px',
+            color: 'var(--text-light)', letterSpacing: '0.1em', fontWeight: 600,
+          }}>
+            — OR —
           </div>
 
           {/* Content */}
           <div style={{ marginBottom: '16px' }}>
-            <label style={labelStyle}>Content</label>
+            <label style={labelStyle}>Paste Content</label>
             <textarea
-              rows={6}
+              rows={5}
               value={form.content}
               onChange={e => set('content', e.target.value)}
-              placeholder="Paste or write the knowledge here — or just paste a URL above and hit Auto-Tag"
+              placeholder="Paste the post caption, your notes, or bullet points..."
               style={textareaStyle}
             />
           </div>
+
+          {/* Auto-Tag button */}
+          <div style={{ marginBottom: '20px' }}>
+            <button
+              onClick={handleAutoTag}
+              disabled={autoTagging || !canAutoTag}
+              style={{
+                ...btnPrimary, width: '100%', textAlign: 'center',
+                opacity: (autoTagging || !canAutoTag) ? 0.5 : 1,
+                padding: '12px 20px', fontSize: '14px',
+              }}
+            >
+              {autoTagging
+                ? (imageFile ? 'Reading screenshot...' : 'Auto-tagging...')
+                : (imageFile ? 'Auto-Tag from Screenshot' : 'Auto-Tag from Content')
+              }
+            </button>
+          </div>
+
+          {/* Divider */}
+          <div style={{
+            borderTop: '1px solid var(--cream-dark)', margin: '20px 0',
+          }} />
 
           {/* Title */}
           <div style={{ marginBottom: '16px' }}>
@@ -585,6 +744,17 @@ export default function AdminKnowledgePage() {
             </div>
           </div>
 
+          {/* Source URL — optional, reference only */}
+          <div style={{ marginBottom: '16px' }}>
+            <label style={labelStyle}>Source URL <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 'normal' }}>(optional — for your reference only)</span></label>
+            <input
+              value={form.source_url}
+              onChange={e => set('source_url', e.target.value)}
+              placeholder="https://instagram.com/p/..."
+              style={inputStyle}
+            />
+          </div>
+
           {/* Destinations */}
           <div style={{ marginBottom: '16px' }}>
             <label style={labelStyle}>Destinations</label>
@@ -632,10 +802,10 @@ export default function AdminKnowledgePage() {
           {/* Save */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <button onClick={handleSave} disabled={saving} style={{ ...btnPrimary, opacity: saving ? 0.5 : 1 }}>
-              {saving ? 'Saving...' : (form.id ? 'Update' : 'Save')}
+              {saving ? 'Saving...' : (form.id ? 'Update' : 'Save Entry')}
             </button>
             {saveMsg && (
-              <span style={{ fontSize: '13px', color: saveMsg.ok ? 'var(--green)' : '#d97070', fontWeight: 500 }}>
+              <span style={{ fontSize: '13px', color: saveMsg.ok ? '#2d4a2d' : '#d97070', fontWeight: 500 }}>
                 {saveMsg.text}
               </span>
             )}
@@ -691,81 +861,98 @@ export default function AdminKnowledgePage() {
               ...sectionStyle, marginBottom: 0, padding: '16px 20px',
               opacity: entry.is_active ? 1 : 0.55,
             }}>
-              {/* Top row: title + badges */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '15px', fontWeight: 600 }}>{entry.title}</span>
-                    <CategoryBadge category={entry.category} />
-                    <PlatformIcon platform={entry.source_platform} />
-                    {!entry.is_active && (
-                      <span style={{ fontSize: '11px', color: '#d97070', fontWeight: 600 }}>INACTIVE</span>
-                    )}
-                  </div>
-                  {entry.source_author && (
-                    <span style={{ fontSize: '12px', color: 'var(--text-light)' }}>
-                      by {entry.source_author}
-                    </span>
-                  )}
-                </div>
-                <span style={{ fontSize: '11px', color: 'var(--text-light)', whiteSpace: 'nowrap' }}>
-                  {fmt(entry.created_at)}
-                </span>
-              </div>
-
-              {/* Content preview */}
-              <p style={{
-                fontSize: '13px', color: 'var(--green-deep)', lineHeight: 1.5,
-                margin: '0 0 10px', whiteSpace: 'pre-wrap',
-                maxHeight: '80px', overflow: 'hidden',
-              }}>
-                {entry.content}
-              </p>
-
-              {/* Tags row */}
-              {(entry.destinations.length > 0 || entry.courses_mentioned.length > 0 || entry.tags.length > 0) && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }}>
-                  {entry.destinations.map(d => (
-                    <span key={d} style={{
-                      padding: '2px 8px', borderRadius: '99px', fontSize: '11px',
-                      background: 'rgba(45,90,60,0.12)', color: 'var(--green)',
-                    }}>
-                      {d}
-                    </span>
-                  ))}
-                  {entry.courses_mentioned.map(c => (
-                    <span key={c} style={{
-                      padding: '2px 8px', borderRadius: '99px', fontSize: '11px',
-                      background: 'rgba(196,168,79,0.12)', color: 'var(--gold)',
-                    }}>
-                      {c}
-                    </span>
-                  ))}
-                  {entry.tags.map(t => (
-                    <span key={t} style={{
-                      padding: '2px 8px', borderRadius: '99px', fontSize: '11px',
-                      background: 'rgba(139,120,90,0.08)', color: 'var(--sand)',
-                    }}>
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button onClick={() => openEdit(entry)} style={btnSmall}>Edit</button>
-                <button onClick={() => handleToggleActive(entry)} style={btnSmall}>
-                  {entry.is_active ? 'Deactivate' : 'Activate'}
-                </button>
-                {entry.source_url && (
-                  <a href={entry.source_url} target="_blank" rel="noopener noreferrer" style={{
-                    ...btnSmall, textDecoration: 'none', display: 'inline-flex', alignItems: 'center',
-                  }}>
-                    Source
-                  </a>
+              <div style={{ display: 'flex', gap: '16px' }}>
+                {/* Screenshot thumbnail */}
+                {entry.screenshot_url && (
+                  <img
+                    src={entry.screenshot_url}
+                    alt=""
+                    style={{
+                      width: '72px', height: '72px', objectFit: 'cover',
+                      borderRadius: 'var(--radius-sm)', border: '1px solid var(--cream-dark)',
+                      flexShrink: 0,
+                    }}
+                  />
                 )}
-                <button onClick={() => handleDelete(entry.id)} style={btnDanger}>Delete</button>
+
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* Top row: title + badges */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '15px', fontWeight: 600 }}>{entry.title}</span>
+                        <CategoryBadge category={entry.category} />
+                        <PlatformIcon platform={entry.source_platform} />
+                        {!entry.is_active && (
+                          <span style={{ fontSize: '11px', color: '#d97070', fontWeight: 600 }}>INACTIVE</span>
+                        )}
+                      </div>
+                      {entry.source_author && (
+                        <span style={{ fontSize: '12px', color: 'var(--text-light)' }}>
+                          by {entry.source_author}
+                        </span>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-light)', whiteSpace: 'nowrap' }}>
+                      {fmt(entry.created_at)}
+                    </span>
+                  </div>
+
+                  {/* Content preview */}
+                  <p style={{
+                    fontSize: '13px', color: 'var(--green-deep)', lineHeight: 1.5,
+                    margin: '0 0 10px', whiteSpace: 'pre-wrap',
+                    maxHeight: '80px', overflow: 'hidden',
+                  }}>
+                    {entry.content}
+                  </p>
+
+                  {/* Tags row */}
+                  {(entry.destinations.length > 0 || entry.courses_mentioned.length > 0 || entry.tags.length > 0) && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }}>
+                      {entry.destinations.map(d => (
+                        <span key={d} style={{
+                          padding: '2px 8px', borderRadius: '99px', fontSize: '11px',
+                          background: 'rgba(45,90,60,0.12)', color: '#2d4a2d',
+                        }}>
+                          {d}
+                        </span>
+                      ))}
+                      {entry.courses_mentioned.map(c => (
+                        <span key={c} style={{
+                          padding: '2px 8px', borderRadius: '99px', fontSize: '11px',
+                          background: 'rgba(196,168,79,0.12)', color: '#8a7530',
+                        }}>
+                          {c}
+                        </span>
+                      ))}
+                      {entry.tags.map(t => (
+                        <span key={t} style={{
+                          padding: '2px 8px', borderRadius: '99px', fontSize: '11px',
+                          background: 'rgba(139,120,90,0.12)', color: '#7a6b50',
+                        }}>
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={() => openEdit(entry)} style={btnSmall}>Edit</button>
+                    <button onClick={() => handleToggleActive(entry)} style={btnSmall}>
+                      {entry.is_active ? 'Deactivate' : 'Activate'}
+                    </button>
+                    {entry.source_url && (
+                      <a href={entry.source_url} target="_blank" rel="noopener noreferrer" style={{
+                        ...btnSmall, textDecoration: 'none', display: 'inline-flex', alignItems: 'center',
+                      }}>
+                        Source
+                      </a>
+                    )}
+                    <button onClick={() => handleDelete(entry.id)} style={btnDanger}>Delete</button>
+                  </div>
+                </div>
               </div>
             </div>
           ))}
