@@ -50,3 +50,42 @@ export async function PATCH(
 
   return NextResponse.json(match)
 }
+
+// PUT — bulk update matches for a session (inline pairing edit)
+export async function PUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  await params
+  const body = await req.json()
+  const db = createAdminSupabaseClient()
+
+  const { session_id, matches } = body
+  if (!session_id) return NextResponse.json({ error: 'session_id required' }, { status: 400 })
+  if (!matches || !Array.isArray(matches)) return NextResponse.json({ error: 'matches array required' }, { status: 400 })
+
+  // Delete existing matches for this session
+  await db.from('cup_matches').delete().eq('session_id', session_id)
+
+  // Insert new matches
+  if (matches.length > 0) {
+    const rows = matches.map((m: any, i: number) => ({
+      session_id,
+      team_a_player1_id: m.team_a_player1_id || null,
+      team_a_player2_id: m.team_a_player2_id || null,
+      team_b_player1_id: m.team_b_player1_id || null,
+      team_b_player2_id: m.team_b_player2_id || null,
+      match_order: m.match_order ?? i + 1,
+    }))
+
+    const { data, error } = await db
+      .from('cup_matches')
+      .insert(rows)
+      .select()
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ matches: data })
+  }
+
+  return NextResponse.json({ matches: [] })
+}

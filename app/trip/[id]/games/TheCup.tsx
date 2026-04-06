@@ -190,6 +190,15 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
   const [editResult, setEditResult]     = useState<string | null>(null)
   const [editMargin, setEditMargin]     = useState('')
 
+  // Inline pairing edit state
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
+  const [editPairings, setEditPairings] = useState<Array<{
+    team_a_player1_id: string | null; team_a_player2_id: string | null
+    team_b_player1_id: string | null; team_b_player2_id: string | null
+  }>>([])
+  const [editFormat, setEditFormat] = useState<string>('four_ball')
+  const [savingPairings, setSavingPairings] = useState(false)
+
   // Collapsible sessions
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
@@ -539,14 +548,161 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
     setShowDeleteConfirm(false)
   }
 
+  // ─── Inline pairing edit ───────────────────────────────────────────────────
+
+  function startEditingSession(session: CupSession) {
+    setEditingSessionId(session.id)
+    setEditFormat(session.format)
+    // Clone existing match pairings into edit state
+    const pairings = session.matches.map(m => ({
+      team_a_player1_id: m.team_a_player1_id ? String(m.team_a_player1_id) : null,
+      team_a_player2_id: m.team_a_player2_id ? String(m.team_a_player2_id) : null,
+      team_b_player1_id: m.team_b_player1_id ? String(m.team_b_player1_id) : null,
+      team_b_player2_id: m.team_b_player2_id ? String(m.team_b_player2_id) : null,
+    }))
+    // Ensure we have at least the right number of match slots
+    if (pairings.length === 0 && cup) {
+      const teamACount = cup.teams.filter(t => t.team === 'a').length
+      const teamBCount = cup.teams.filter(t => t.team === 'b').length
+      const isSingles = session.format === 'singles'
+      const matchCount = isSingles
+        ? Math.min(teamACount, teamBCount)
+        : Math.min(Math.floor(teamACount / 2), Math.floor(teamBCount / 2))
+      for (let i = 0; i < matchCount; i++) {
+        pairings.push({ team_a_player1_id: null, team_a_player2_id: null, team_b_player1_id: null, team_b_player2_id: null })
+      }
+    }
+    setEditPairings(pairings)
+  }
+
+  function cancelEditingSession() {
+    setEditingSessionId(null)
+    setEditPairings([])
+  }
+
+  function updateEditPairing(matchIdx: number, field: string, value: string | null) {
+    setEditPairings(prev => {
+      const next = [...prev]
+      next[matchIdx] = { ...next[matchIdx], [field]: value || null }
+      return next
+    })
+  }
+
+  function getUsedPlayerIds(team: 'a' | 'b', excludeMatchIdx: number): Set<string> {
+    const used = new Set<string>()
+    editPairings.forEach((p, i) => {
+      if (i === excludeMatchIdx) return
+      if (team === 'a') {
+        if (p.team_a_player1_id) used.add(p.team_a_player1_id)
+        if (p.team_a_player2_id) used.add(p.team_a_player2_id)
+      } else {
+        if (p.team_b_player1_id) used.add(p.team_b_player1_id)
+        if (p.team_b_player2_id) used.add(p.team_b_player2_id)
+      }
+    })
+    return used
+  }
+
+  function handleInlineAutoPair(session: CupSession) {
+    if (!cup) return
+    const fmt = editFormat
+    const teamAMembers = members
+      .filter(m => cup.teams.some(t => String(t.member_id) === mid(m) && t.team === 'a'))
+      .sort((a, b) => getHandicap(a) - getHandicap(b))
+    const teamBMembers = members
+      .filter(m => cup.teams.some(t => String(t.member_id) === mid(m) && t.team === 'b'))
+      .sort((a, b) => getHandicap(a) - getHandicap(b))
+
+    const pairings: typeof editPairings = []
+
+    if (fmt === 'singles') {
+      const count = Math.min(teamAMembers.length, teamBMembers.length)
+      for (let i = 0; i < count; i++) {
+        pairings.push({
+          team_a_player1_id: mid(teamAMembers[i]),
+          team_a_player2_id: null,
+          team_b_player1_id: mid(teamBMembers[i]),
+          team_b_player2_id: null,
+        })
+      }
+    } else {
+      const pairsA: string[][] = []
+      const pairsB: string[][] = []
+      for (let i = 0; i < teamAMembers.length - 1; i += 2) {
+        pairsA.push([mid(teamAMembers[i]), mid(teamAMembers[i + 1])])
+      }
+      for (let i = 0; i < teamBMembers.length - 1; i += 2) {
+        pairsB.push([mid(teamBMembers[i]), mid(teamBMembers[i + 1])])
+      }
+      const count = Math.min(pairsA.length, pairsB.length)
+      for (let i = 0; i < count; i++) {
+        pairings.push({
+          team_a_player1_id: pairsA[i][0],
+          team_a_player2_id: pairsA[i][1],
+          team_b_player1_id: pairsB[i][0],
+          team_b_player2_id: pairsB[i][1],
+        })
+      }
+    }
+    setEditPairings(pairings)
+  }
+
+  async function handleSavePairings(sessionId: string) {
+    setSavingPairings(true)
+    try {
+      // Save format if changed
+      const session = cup?.sessions.find(s => s.id === sessionId)
+      if (session && session.format !== editFormat) {
+        await fetch(`/api/trips/${tripId}/cup/sessions`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sessionId, format: editFormat }),
+        })
+      }
+      // Save pairings
+      await fetch(`/api/trips/${tripId}/cup/matches`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          matches: editPairings.map((p, i) => ({ ...p, match_order: i + 1 })),
+        }),
+      })
+      setEditingSessionId(null)
+      setEditPairings([])
+      await fetchCup()
+    } catch { /* ignore */ }
+    setSavingPairings(false)
+  }
+
+  function handleFormatChange(newFormat: string) {
+    if (editPairings.some(p => p.team_a_player1_id || p.team_b_player1_id)) {
+      if (!confirm('Changing format will reset pairings for this round. Continue?')) return
+    }
+    setEditFormat(newFormat)
+    // Recalculate match slots
+    if (!cup) return
+    const teamACount = cup.teams.filter(t => t.team === 'a').length
+    const teamBCount = cup.teams.filter(t => t.team === 'b').length
+    const isSingles = newFormat === 'singles'
+    const matchCount = isSingles
+      ? Math.min(teamACount, teamBCount)
+      : Math.min(Math.floor(teamACount / 2), Math.floor(teamBCount / 2))
+    const fresh: typeof editPairings = []
+    for (let i = 0; i < matchCount; i++) {
+      fresh.push({ team_a_player1_id: null, team_a_player2_id: null, team_b_player1_id: null, team_b_player2_id: null })
+    }
+    setEditPairings(fresh)
+  }
+
   // ─── Member lookup ─────────────────────────────────────────────────────────
 
   const memberMap = new Map(members.map(m => [mid(m), m]))
 
-  function getMemberName(id: string | null): string {
-    if (!id) return '?'
-    const m = memberMap.get(id)
-    return m ? memberLastName(m) : '?'
+  function getMemberName(id: string | number | null): string {
+    if (id == null) return 'TBD'
+    const m = memberMap.get(String(id))
+    return m ? memberLastName(m) : 'TBD'
   }
 
   // ─── Loading ───────────────────────────────────────────────────────────────
@@ -1107,30 +1263,157 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {session.status === 'complete' && (
+                {session.status === 'complete' && editingSessionId !== session.id && (
                   <span style={{ fontSize: '12px', fontWeight: 600, color: sessionA > sessionB ? cup.team_a_color : sessionB > sessionA ? cup.team_b_color : '#9ca3af' }}>
                     {sessionA}–{sessionB}
                   </span>
                 )}
-                <span style={{
-                  fontSize: '10px', fontWeight: 600, padding: '3px 8px', borderRadius: 20,
-                  background: statusBg, color: statusColor,
-                }}>
-                  {statusLabel}
-                </span>
+                {editingSessionId === session.id ? (
+                  <button onClick={(e) => { e.stopPropagation(); cancelEditingSession() }} style={{
+                    padding: '3px 10px', borderRadius: 6, fontSize: '11px', fontWeight: 600,
+                    background: 'none', border: '1px solid #d1d5db', color: '#6b7280', cursor: 'pointer',
+                  }}>Done</button>
+                ) : (
+                  <>
+                    <span style={{
+                      fontSize: '10px', fontWeight: 600, padding: '3px 8px', borderRadius: 20,
+                      background: statusBg, color: statusColor,
+                    }}>
+                      {statusLabel}
+                    </span>
+                    {isOrganizer && (
+                      <button onClick={(e) => { e.stopPropagation(); startEditingSession(session) }} style={{
+                        padding: '3px 10px', borderRadius: 6, fontSize: '11px', fontWeight: 500,
+                        background: 'none', border: '1px solid #d1d5db', color: '#6b7280', cursor: 'pointer',
+                        fontFamily: 'var(--font-sans)',
+                      }}>✏️ Edit</button>
+                    )}
+                  </>
+                )}
               </div>
             </button>
 
-            {/* Matches */}
-            {!isCollapsed && (
+            {/* Inline pairing edit mode */}
+            {!isCollapsed && editingSessionId === session.id && (
+              <div style={{ padding: '12px 20px 16px', background: '#faf9f7' }}>
+                {/* Format selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Format</span>
+                  <select
+                    value={editFormat}
+                    onChange={e => handleFormatChange(e.target.value)}
+                    style={{ ...INPUT, width: 'auto', padding: '4px 8px', fontSize: '12px' }}
+                  >
+                    {FORMAT_OPTIONS.map(o => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Match rows with dropdowns */}
+                {editPairings.map((pairing, mi) => {
+                  const isSingles = editFormat === 'singles'
+                  const usedA = getUsedPlayerIds('a', mi)
+                  const usedB = getUsedPlayerIds('b', mi)
+                  const teamAPlayers = members.filter(m => cup.teams.some(t => String(t.member_id) === mid(m) && t.team === 'a'))
+                  const teamBPlayers = members.filter(m => cup.teams.some(t => String(t.member_id) === mid(m) && t.team === 'b'))
+
+                  const selectStyle: React.CSSProperties = {
+                    ...INPUT, padding: '5px 6px', fontSize: '12px', width: '100%', minWidth: 0,
+                    borderColor: '#e5e7eb',
+                  }
+
+                  return (
+                    <div key={mi} style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '8px 0', borderBottom: '1px solid #f0ece4',
+                      fontSize: '12px',
+                    }}>
+                      <span style={{ fontSize: '11px', color: '#9ca3af', width: 52, flexShrink: 0 }}>Match {mi + 1}</span>
+
+                      {/* Team A */}
+                      <div style={{ flex: 1, display: 'flex', gap: 4 }}>
+                        <select value={pairing.team_a_player1_id ?? ''} onChange={e => updateEditPairing(mi, 'team_a_player1_id', e.target.value)} style={{ ...selectStyle, borderLeft: `3px solid ${cup.team_a_color}` }}>
+                          <option value="">TBD</option>
+                          {teamAPlayers.map(m => (
+                            <option key={mid(m)} value={mid(m)} disabled={usedA.has(mid(m)) && mid(m) !== (pairing.team_a_player1_id ?? '')}>
+                              {memberLastName(m)} ({getHandicap(m)})
+                            </option>
+                          ))}
+                        </select>
+                        {!isSingles && (
+                          <select value={pairing.team_a_player2_id ?? ''} onChange={e => updateEditPairing(mi, 'team_a_player2_id', e.target.value)} style={selectStyle}>
+                            <option value="">TBD</option>
+                            {teamAPlayers.map(m => (
+                              <option key={mid(m)} value={mid(m)} disabled={usedA.has(mid(m)) && mid(m) !== (pairing.team_a_player2_id ?? '')}>
+                                {memberLastName(m)} ({getHandicap(m)})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+
+                      <span style={{ color: '#9ca3af', fontSize: '11px', flexShrink: 0 }}>vs</span>
+
+                      {/* Team B */}
+                      <div style={{ flex: 1, display: 'flex', gap: 4 }}>
+                        <select value={pairing.team_b_player1_id ?? ''} onChange={e => updateEditPairing(mi, 'team_b_player1_id', e.target.value)} style={{ ...selectStyle, borderLeft: `3px solid ${cup.team_b_color}` }}>
+                          <option value="">TBD</option>
+                          {teamBPlayers.map(m => (
+                            <option key={mid(m)} value={mid(m)} disabled={usedB.has(mid(m)) && mid(m) !== (pairing.team_b_player1_id ?? '')}>
+                              {memberLastName(m)} ({getHandicap(m)})
+                            </option>
+                          ))}
+                        </select>
+                        {!isSingles && (
+                          <select value={pairing.team_b_player2_id ?? ''} onChange={e => updateEditPairing(mi, 'team_b_player2_id', e.target.value)} style={selectStyle}>
+                            <option value="">TBD</option>
+                            {teamBPlayers.map(m => (
+                              <option key={mid(m)} value={mid(m)} disabled={usedB.has(mid(m)) && mid(m) !== (pairing.team_b_player2_id ?? '')}>
+                                {memberLastName(m)} ({getHandicap(m)})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Action buttons */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                  <button onClick={() => handleInlineAutoPair(session)} style={{
+                    ...BTN_OUTLINE, padding: '6px 14px', fontSize: '12px',
+                  }}>
+                    ✦ Auto-Pair
+                  </button>
+                  <button onClick={() => handleSavePairings(session.id)} disabled={savingPairings} style={{
+                    padding: '8px 20px', borderRadius: 8, fontSize: '13px', fontWeight: 600,
+                    background: 'var(--gold)', color: '#fff', border: 'none', cursor: 'pointer',
+                    fontFamily: 'var(--font-sans)', opacity: savingPairings ? 0.5 : 1,
+                  }}>
+                    {savingPairings ? 'Saving…' : 'Save Pairings'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Normal match display */}
+            {!isCollapsed && editingSessionId !== session.id && (
               <div style={{ padding: '8px 20px 16px' }}>
                 {session.matches.length === 0 ? (
                   <div style={{ fontSize: '13px', color: '#9ca3af', padding: '8px 0' }}>
                     No pairings set up for this session.
+                    {isOrganizer && (
+                      <button onClick={() => startEditingSession(session)} style={{
+                        marginLeft: 8, background: 'none', border: '1px dashed #d1d5db', borderRadius: 6,
+                        padding: '3px 10px', fontSize: '11px', color: '#6b7280', cursor: 'pointer',
+                      }}>Set Up Pairings</button>
+                    )}
                   </div>
                 ) : (
                   session.matches.map(match => {
-                    const isEditing = editingMatch === match.id
+                    const isEditingScore = editingMatch === match.id
                     const hasResult = match.result !== null
 
                     return (
@@ -1149,7 +1432,7 @@ export default function TheCup({ tripId, tripName, members, teeTimes, isOrganize
 
                         {/* Score / result area */}
                         <div style={{ width: 120, textAlign: 'center', flexShrink: 0 }}>
-                          {isEditing ? (
+                          {isEditingScore ? (
                             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                               <div style={{ display: 'flex', gap: 4 }}>
                                 <button onClick={() => setEditResult('team_a')} style={{
